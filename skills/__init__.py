@@ -1,36 +1,97 @@
 # ============================================================
-#  SKILLS REGISTRY
-#  Add new class skills here as they are created.
-#  Key = display label shown in the app dropdown
+#  skills/__init__.py
+#  Auto-discovering skill registry.
+#
+#  DROP a new skill file into the skills/ folder.
+#  It will appear in the app automatically — no other
+#  files need to be edited.
+#
+#  Each skill file must:
+#    1. Import BaseSkill from skills.base
+#    2. Define a class that inherits BaseSkill
+#    3. Set META["code"] to a unique short string
 # ============================================================
 
-from skills.casualty import (
-    CLASS_LABEL as CASUALTY_LABEL,
-    REQUIRED_FIELDS as CASUALTY_FIELDS,
-    CSV_SCHEMA as CASUALTY_SCHEMA,
-    CLAIMS_CSV_SCHEMA as CASUALTY_CLAIMS_SCHEMA,
-    SYSTEM_PROMPT as CASUALTY_PROMPT,
-)
+import os
+import importlib
+import inspect
+from skills.base import BaseSkill
 
-SKILLS = {
-    "Casualty Liability": {
-        "label":            CASUALTY_LABEL,
-        "required_fields":  CASUALTY_FIELDS,
-        "csv_schema":       CASUALTY_SCHEMA,
-        "claims_csv_schema": CASUALTY_CLAIMS_SCHEMA,
-        "system_prompt":    CASUALTY_PROMPT,
-    },
-    # Future classes — add imports above and entries here:
-    # "Industrial All Risks": { ... },
-    # "Contingency":          { ... },
-    # "Space":                { ... },
-}
+# ── AUTO-DISCOVERY ────────────────────────────────────────────
+_REGISTRY: dict = {}   # { label: SkillClass }
 
-def get_skill(class_name: str) -> dict:
-    """Return skill config for a class, or raise KeyError."""
-    if class_name not in SKILLS:
-        raise KeyError(f"No skill found for class: {class_name}")
-    return SKILLS[class_name]
+def _discover_skills():
+    """
+    Scan the skills/ directory for .py files (excluding base and __init__).
+    Import each, find classes that subclass BaseSkill, register them.
+    """
+    skills_dir = os.path.dirname(__file__)
+
+    for fname in sorted(os.listdir(skills_dir)):
+        if not fname.endswith(".py"):
+            continue
+        if fname.startswith("_") or fname == "base.py":
+            continue
+
+        module_name = f"skills.{fname[:-3]}"
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as e:
+            print(f"[skills] Warning: could not import {module_name}: {e}")
+            continue
+
+        for name, obj in inspect.getmembers(module, inspect.isclass):
+            if (
+                issubclass(obj, BaseSkill)
+                and obj is not BaseSkill
+                and obj.META.get("code")          # must have a code set
+            ):
+                label = obj.label()
+                _REGISTRY[label] = obj
+
+_discover_skills()
+
+
+# ── PUBLIC API ────────────────────────────────────────────────
 
 def available_classes() -> list:
-    return list(SKILLS.keys())
+    """Return sorted list of skill labels for the UI dropdown."""
+    return sorted(_REGISTRY.keys())
+
+
+def get_skill_class(label: str) -> type:
+    """Return the skill class for a given label."""
+    if label not in _REGISTRY:
+        raise KeyError(f"No skill registered for: '{label}'. Available: {available_classes()}")
+    return _REGISTRY[label]
+
+
+def get_skill(label: str) -> dict:
+    """
+    Return skill config dict compatible with existing app code.
+    Keys: label, required_fields, csv_schema, claims_csv_schema,
+          system_prompt, skill_class
+    """
+    cls = get_skill_class(label)
+    return {
+        "label":            cls.label(),
+        "code":             cls.code(),
+        "version":          cls.version(),
+        "description":      cls.description(),
+        "required_fields":  cls.required_fields(),
+        "csv_schema":       cls.csv_schema(),
+        "claims_csv_schema": cls.CLAIMS_SCHEMA,
+        "system_prompt":    cls.SYSTEM_PROMPT,
+        "output_schema":    cls.OUTPUT_SCHEMA,
+        "skill_class":      cls,
+    }
+
+
+def list_skills_doc() -> str:
+    """Print schema documentation for all registered skills."""
+    lines = []
+    for label in available_classes():
+        cls = get_skill_class(label)
+        lines.append(cls.schema_doc())
+        lines.append("\n" + "=" * 80 + "\n")
+    return "\n".join(lines)

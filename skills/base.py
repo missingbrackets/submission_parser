@@ -56,6 +56,30 @@ class FieldSection(Enum):
     FLAGS       = "Risk Flags"
     ANALYTICS   = "Underwriter Analytics"
     META        = "Metadata"
+    # Terror / Political Violence specific
+    LOCATIONS   = "Locations & SOV"
+    PERILS      = "Peril Structure"
+    BI_EXT      = "BI & Extensions"
+    GEO         = "Geopolitical Assessment"
+    RATER       = "Rater Inputs"
+
+
+# ── TAB CONFIGURATION ────────────────────────────────────────
+
+@dataclass
+class TabConfig:
+    """
+    Defines a display tab in the extracted data view.
+
+    section     : FieldSection this tab displays
+    icon        : emoji icon for the tab label
+    default_on  : whether the tab is ticked by default in the sidebar
+    description : tooltip shown next to the checkbox
+    """
+    section:     FieldSection
+    icon:        str   = "📋"
+    default_on:  bool  = True
+    description: str   = ""
 
 
 # ── OUTPUT FIELD DEFINITION ───────────────────────────────────
@@ -174,6 +198,51 @@ class BaseSkill:
             if f.in_summary:
                 sections.setdefault(f.section, []).append(f)
         return sections
+
+    @classmethod
+    def tab_config(cls) -> list:
+        """
+        Return list of TabConfig for this skill.
+        Override in subclass to customise tab order, icons, defaults.
+        Default behaviour: one tab per FieldSection that has in_summary fields,
+        in enum order.
+        """
+        # Use skill-defined tabs if present
+        if hasattr(cls, "TABS") and cls.TABS:
+            return cls.TABS
+
+        # Auto-generate from sections that have displayable fields
+        sections_with_fields = {
+            f.section for f in cls.OUTPUT_SCHEMA
+            if f.in_summary and f.source.value != "metadata"
+        }
+
+        default_icons = {
+            FieldSection.INSURED:   "🏢",
+            FieldSection.POLICY:    "📄",
+            FieldSection.LIMITS:    "🔢",
+            FieldSection.COVERAGE:  "🏷",
+            FieldSection.PREMIUM:   "💷",
+            FieldSection.LOSS:      "📉",
+            FieldSection.FLAGS:     "⚠️",
+            FieldSection.ANALYTICS: "🚩",
+            FieldSection.META:      "ℹ️",
+            FieldSection.LOCATIONS: "📍",
+            FieldSection.PERILS:    "💥",
+            FieldSection.BI_EXT:    "🔄",
+            FieldSection.GEO:       "🌍",
+            FieldSection.RATER:     "🧮",
+        }
+
+        return [
+            TabConfig(
+                section    = s,
+                icon       = default_icons.get(s, "📋"),
+                default_on = True,
+            )
+            for s in FieldSection
+            if s in sections_with_fields
+        ]
 
     @classmethod
     def fields_by_key(cls) -> dict:

@@ -241,7 +241,7 @@ def build_csv_row(
         row["large_losses_flagged"] = "Y" if len(large_losses) > 0 else "N"
 
     # ── UW flags summary
-    uw_flags = extracted.get("uw_analyst_flags") or []
+    uw_flags = [f for f in (extracted.get("uw_analyst_flags") or []) if isinstance(f, dict)]
     if isinstance(uw_flags, list):
         red   = [f for f in uw_flags if str(f.get("severity","")).upper() == "RED"]
         amber = [f for f in uw_flags if str(f.get("severity","")).upper() == "AMBER"]
@@ -368,6 +368,98 @@ def save_claims_csv(
         writer = csv.DictWriter(f, fieldnames=claims_csv_schema)
         if not file_exists:
             writer.writeheader()
+        writer.writerows(rows)
+
+    return filepath
+
+
+# ── LOCATIONS CSV BUILDER ────────────────────────────────────
+def build_locations_csv_rows(extracted: dict) -> list:
+    """
+    Build one row per SOV location from extracted sov_locations array.
+    Falls back to synthesising from aggregate data if no SOV provided.
+    Returns list of dicts.
+    """
+    LOCATION_SCHEMA = [
+        "insured_name", "policy_period_start", "location_id",
+        "location_name", "address", "city", "country",
+        "latitude", "longitude",
+        "occupancy", "construction", "storeys",
+        "tiv_total", "tiv_pd", "tiv_bi", "tiv_stock", "tiv_currency",
+        "fire_protection", "security_protection",
+        "peak_tiv_flag", "notes",
+    ]
+
+    rows = []
+    insured      = _safe(extracted.get("insured_name"))
+    policy_start = _safe(extracted.get("policy_period_start"))
+    currency     = _safe(extracted.get("tiv_currency") or extracted.get("limit_currency") or "")
+
+    locations = extracted.get("sov_locations") or []
+    valid_locs = [l for l in locations if isinstance(l, dict)]
+
+    if valid_locs:
+        for i, loc in enumerate(valid_locs):
+            row = {col: "" for col in LOCATION_SCHEMA}
+            row["insured_name"]      = insured
+            row["policy_period_start"] = policy_start
+            row["location_id"]       = f"LOC-{str(i+1).zfill(3)}"
+            row["location_name"]     = _safe(loc.get("location_name") or loc.get("name"))
+            row["address"]           = _safe(loc.get("address"))
+            row["city"]              = _safe(loc.get("city"))
+            row["country"]           = _safe(loc.get("country"))
+            row["latitude"]          = _safe(loc.get("latitude") or loc.get("lat"))
+            row["longitude"]         = _safe(loc.get("longitude") or loc.get("lon") or loc.get("lng"))
+            row["occupancy"]         = _safe(loc.get("occupancy") or loc.get("use") or loc.get("type"))
+            row["construction"]      = _safe(loc.get("construction"))
+            row["storeys"]           = _safe(loc.get("storeys") or loc.get("floors"))
+            row["tiv_total"]         = _safe(loc.get("tiv") or loc.get("tiv_total"))
+            row["tiv_pd"]            = _safe(loc.get("tiv_pd") or loc.get("pd_value"))
+            row["tiv_bi"]            = _safe(loc.get("tiv_bi") or loc.get("bi_value"))
+            row["tiv_stock"]         = _safe(loc.get("tiv_stock") or loc.get("stock_value"))
+            row["tiv_currency"]      = _safe(loc.get("currency") or currency)
+            row["fire_protection"]   = _safe(loc.get("fire_protection") or loc.get("fire"))
+            row["security_protection"] = _safe(loc.get("security_protection") or loc.get("security"))
+            row["peak_tiv_flag"]     = _safe(loc.get("peak_tiv_flag") or loc.get("is_largest") or "")
+            row["notes"]             = _safe(loc.get("notes") or loc.get("comments"))
+            rows.append(row)
+    else:
+        # No SOV — synthesise a single summary row from aggregate data
+        row = {col: "" for col in LOCATION_SCHEMA}
+        row["insured_name"]       = insured
+        row["policy_period_start"] = policy_start
+        row["location_id"]        = "AGG-001"
+        row["location_name"]      = "Aggregate (no SOV provided)"
+        row["country"]            = _safe(extracted.get("insured_country") or extracted.get("territorial_scope"))
+        row["tiv_total"]          = _safe(extracted.get("tiv_total"))
+        row["tiv_pd"]             = _safe(extracted.get("tiv_pd"))
+        row["tiv_bi"]             = _safe(extracted.get("tiv_bi"))
+        row["tiv_stock"]          = _safe(extracted.get("tiv_stock"))
+        row["tiv_currency"]       = currency
+        row["notes"]              = "No SOV provided — aggregate TIV only"
+        rows.append(row)
+
+    return rows, LOCATION_SCHEMA
+
+
+def save_locations_csv(
+    rows: list,
+    schema: list,
+    output_folder: str,
+    filename: str = "locations_data.csv",
+) -> str:
+    """
+    Write locations rows to output_folder/02_data/locations_data.csv.
+    Overwrites each run (locations are per-submission, not cumulative).
+    Returns full file path.
+    """
+    data_folder = os.path.join(output_folder, "02_data")
+    os.makedirs(data_folder, exist_ok=True)
+    filepath = os.path.join(data_folder, filename)
+
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=schema)
+        writer.writeheader()
         writer.writerows(rows)
 
     return filepath
@@ -533,7 +625,7 @@ def save_summary_report(
             lines.append(f"  • {feat}")
 
     # UW Analyst Flags
-    uw_flags = extracted.get("uw_analyst_flags") or []
+    uw_flags = [f for f in (extracted.get("uw_analyst_flags") or []) if isinstance(f, dict)]
     lines.append("")
     lines.append("=" * 70)
     lines.append("  UNDERWRITER ANALYST FLAGS")
@@ -554,7 +646,7 @@ def save_summary_report(
         lines.append("  No flags raised.")
 
     # Data conflicts
-    conflicts = [c for c in (extracted.get("data_conflicts") or []) if c.get("field") and c.get("value_a")]
+    conflicts = [c for c in (extracted.get("data_conflicts") or []) if isinstance(c, dict) and c.get("field") and c.get("value_a")]
     if conflicts:
         lines.append("")
         lines.append("=" * 70)
@@ -567,7 +659,7 @@ def save_summary_report(
             lines.append(f"  Resolution: {c.get('resolution','Manual review required')}")
 
     # Questions for broker
-    questions = [q for q in (extracted.get("questions_for_broker") or []) if q and str(q).strip()]
+    questions = [q for q in (extracted.get("questions_for_broker") or []) if q and not isinstance(q, dict) and str(q).strip()]
     if questions:
         lines.append("")
         lines.append("=" * 70)

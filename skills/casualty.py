@@ -9,7 +9,7 @@
 #    - Read the schema_doc() for full field listing
 # ============================================================
 
-from skills.base import BaseSkill, OutputField, FieldType, FieldSource, FieldSection
+from skills.base import BaseSkill, OutputField, TabConfig, FieldType, FieldSource, FieldSection
 
 O = OutputField   # shorthand
 
@@ -23,6 +23,21 @@ class CasualtySkill(BaseSkill):
         "description": "London Market casualty liability — GL, PL, EL, PI, D&O. "
                        "Claims-made and occurrence triggers. UK and international.",
     }
+
+    # ── TAB CONFIGURATION ────────────────────────────────────
+    # Controls which tabs appear in the extracted data view.
+    # Set default_on=False for tabs you want available but not shown by default.
+
+    TABS = [
+        TabConfig(FieldSection.INSURED,   icon="🏢", default_on=True,  description="Insured identity, revenue, employees"),
+        TabConfig(FieldSection.POLICY,    icon="📄", default_on=True,  description="Policy period, trigger, retro date, territory"),
+        TabConfig(FieldSection.LIMITS,    icon="🔢", default_on=True,  description="Limits, excess, deductible, SIR"),
+        TabConfig(FieldSection.COVERAGE,  icon="🏷", default_on=True,  description="GL, PL, EL, PI, D&O coverage flags"),
+        TabConfig(FieldSection.PREMIUM,   icon="💷", default_on=True,  description="Premium, brokerage, rate change, RoL"),
+        TabConfig(FieldSection.LOSS,      icon="📉", default_on=True,  description="Loss history table and large losses"),
+        TabConfig(FieldSection.FLAGS,     icon="⚠️", default_on=True,  description="Litigation, declinatures, insurer switch"),
+        TabConfig(FieldSection.ANALYTICS, icon="🚩", default_on=True,  description="UW flags, data conflicts, broker questions"),
+    ]
 
     # ── CLAIMS CSV SCHEMA ─────────────────────────────────────
     # One row per claim / loss year. Fixed layout for rating model.

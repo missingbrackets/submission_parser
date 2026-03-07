@@ -86,6 +86,20 @@ def _parse_amount(val) -> str:
     return s
 
 
+# ── OUTPUT PATH HELPER ───────────────────────────────────────
+AUTO_OUTPUT_DIR = "submission_tool_auto_outputs"
+
+def _output_root(case_folder: str) -> str:
+    """
+    All tool outputs go to:
+      <case_folder>/submission_tool_auto_outputs/
+    rather than directly into the case folder subfolders.
+    """
+    root = os.path.join(case_folder, AUTO_OUTPUT_DIR)
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
 # ── GAP ANALYSIS ─────────────────────────────────────────────
 def run_gap_analysis(extracted: dict, required_fields: list) -> dict:
     """
@@ -162,37 +176,35 @@ def build_csv_row(
     row["source_folder"]     = os.path.basename(source_folder.rstrip("\\/"))
     row["class_of_business"] = class_label
 
-    # ── Direct scalar mappings (JSON key → CSV column, same name)
-    scalar_fields = [
-        "insured_name", "insured_country", "industry_sector", "industry_sic_code",
-        "annual_revenue", "annual_payroll", "number_of_employees",
-        "policy_period_start", "policy_period_end", "coverage_trigger",
-        "retroactive_date", "retro_date_adequacy", "jurisdiction", "territorial_scope",
-        "limit_any_one_claim", "limit_aggregate", "excess_point",
-        "deductible", "sir_as_pct_of_limit", "sublimits",
-        "coverage_gl", "coverage_pl", "coverage_el", "coverage_pi", "coverage_do",
-        "premium_sought_gross", "brokerage_pct", "premium_net_of_brokerage",
-        "premium_basis", "prior_premium", "implied_rate_change_pct", "rate_on_line_pct",
-        "ibnr_commentary", "risk_improvements",
-        "pending_litigation", "pending_litigation_detail",
-        "prior_declinatures", "prior_declinatures_detail",
-        "prior_insurer", "broker_name",
-        "insurer_switch_flag", "insurer_switch_reason",
-        "us_canada_exposure", "revenue_growth_flag",
-        "loss_history_years_provided", "loss_history_completeness",
-        "avg_loss_ratio_all_years_pct", "avg_loss_ratio_ex_large_pct",
-        "loss_trend_direction",
-    ]
-    for field in scalar_fields:
-        if field in row:
-            row[field] = _safe(extracted.get(field))
+    # ── Direct scalar mappings — write any extracted field that exists in schema
+    # (generic: works for all skills without hardcoded field lists)
+    SKIP_KEYS = {
+        "extraction_date", "source_folder", "class_of_business",  # metadata set above
+        "loss_history", "large_losses", "sov_locations",          # arrays — handled separately
+        "uw_analyst_flags", "data_conflicts", "questions_for_broker",
+    }
+    for key in csv_schema:
+        if key in SKIP_KEYS:
+            continue
+        if key in extracted and extracted[key] is not None:
+            val = extracted[key]
+            # Skip arrays — they have dedicated handlers below
+            if not isinstance(val, (list, dict)):
+                row[key] = _safe(val)
 
-    # ── Net premium — use Claude's value if present, else calculate
-    if not row.get("premium_net_of_brokerage"):
+    # ── Net premium — only write if column exists in this skill's schema
+    if "premium_net_of_brokerage" in row and not row.get("premium_net_of_brokerage"):
         try:
             gross = float(_parse_amount(extracted.get("premium_sought_gross", "")))
-            brok  = float(_parse_amount(str(extracted.get("brokerage_pct", "0")).replace("%", "")))
+            brok  = float(_parse_amount(str(extracted.get("brokerage_pct", "0") or "0").replace("%", "")))
             row["premium_net_of_brokerage"] = str(round(gross * (1 - brok / 100), 0))
+        except (ValueError, TypeError):
+            pass
+    if "premium_net" in row and not row.get("premium_net"):
+        try:
+            gross = float(_parse_amount(extracted.get("premium_sought_gross", "")))
+            comm  = float(_parse_amount(str(extracted.get("commission_pct", "0") or "0").replace("%", "")))
+            row["premium_net"] = str(round(gross * (1 - comm / 100), 0))
         except (ValueError, TypeError):
             pass
 
@@ -207,6 +219,24 @@ def build_csv_row(
             row[p + "premium"]      = _safe(yr.get("premium"))
             row[p + "losses"]       = _safe(yr.get("losses_total_incurred") or yr.get("losses_paid"))
             row[p + "claims_count"] = _safe(yr.get("claims_count"))
+
+    # ── Rate on line / rate on TIV (only if columns in schema)
+    if "rate_on_line_pct" in row and not row.get("rate_on_line_pct"):
+        try:
+            gross = float(_parse_amount(extracted.get("premium_sought_gross", "")))
+            limit = float(_parse_amount(extracted.get("limit_any_one_occurrence") or extracted.get("limit_any_one_claim", "")))
+            if limit > 0:
+                row["rate_on_line_pct"] = f"{round(gross / limit * 100, 4)}%"
+        except (ValueError, TypeError):
+            pass
+    if "rate_on_tiv_pct" in row and not row.get("rate_on_tiv_pct"):
+        try:
+            gross = float(_parse_amount(extracted.get("premium_sought_gross", "")))
+            tiv   = float(_parse_amount(extracted.get("tiv_total", "")))
+            if tiv > 0:
+                row["rate_on_tiv_pct"] = f"{round(gross / tiv * 100, 4)}%"
+        except (ValueError, TypeError):
+            pass
 
     # ── Derived avg loss ratio (recalculate as sense check)
     try:
@@ -265,8 +295,7 @@ def save_csv(
     output_folder: str,
     filename_prefix: str = "submission_data",
 ) -> str:
-    data_folder = os.path.join(output_folder, "02_data")
-    os.makedirs(data_folder, exist_ok=True)
+    data_folder = _output_root(output_folder)
     filepath    = os.path.join(data_folder, f"{filename_prefix}.csv")
     file_exists = os.path.exists(filepath)
 
@@ -359,8 +388,7 @@ def save_claims_csv(
     output_folder: str,
     filename: str = "claims_data.csv",
 ) -> str:
-    data_folder = os.path.join(output_folder, "02_data")
-    os.makedirs(data_folder, exist_ok=True)
+    data_folder = _output_root(output_folder)
     filepath    = os.path.join(data_folder, filename)
     file_exists = os.path.exists(filepath)
 
@@ -453,8 +481,7 @@ def save_locations_csv(
     Overwrites each run (locations are per-submission, not cumulative).
     Returns full file path.
     """
-    data_folder = os.path.join(output_folder, "02_data")
-    os.makedirs(data_folder, exist_ok=True)
+    data_folder = _output_root(output_folder)
     filepath = os.path.join(data_folder, filename)
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
@@ -466,20 +493,17 @@ def save_locations_csv(
 
 
 # ── SAVE SUMMARY REPORT ───────────────────────────────────────
-def save_summary_report(
+def build_summary_text(
     extracted: dict,
     gap_analysis: dict,
     source_files: dict,
     class_label: str,
-    output_folder: str,
     folder_name: str,
 ) -> str:
-    corr_folder = os.path.join(output_folder, "01_correspondence")
-    os.makedirs(corr_folder, exist_ok=True)
-
-    date_str = datetime.date.today().strftime("%Y%m%d")
-    filepath = os.path.join(corr_folder, f"{date_str}_AI_Summary.txt")
-
+    """
+    Build the full AI summary report as a string.
+    Called by both save_summary_report (file write) and the in-app Summary tab.
+    """
     def line(key, label, width=35):
         val = extracted.get(key)
         display = _safe(val) if val is not None else "NOT PROVIDED"
@@ -696,7 +720,24 @@ def save_summary_report(
     lines.append("  END OF AI SUMMARY — verify all figures against source documents")
     lines.append("=" * 70)
 
+    return "\n".join(lines)
+
+
+def save_summary_report(
+    extracted: dict,
+    gap_analysis: dict,
+    source_files: dict,
+    class_label: str,
+    output_folder: str,
+    folder_name: str,
+) -> str:
+    """Build summary text and write to file. Returns filepath."""
+    text        = build_summary_text(extracted, gap_analysis, source_files, class_label, folder_name)
+    corr_folder = _output_root(output_folder)
+    date_str    = datetime.date.today().strftime("%Y%m%d")
+    filepath    = os.path.join(corr_folder, f"{date_str}_AI_Summary.txt")
+
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+        f.write(text)
 
     return filepath

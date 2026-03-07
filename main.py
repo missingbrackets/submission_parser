@@ -22,6 +22,7 @@ from claude_caller import (
     save_claims_csv,
     build_locations_csv_rows,
     save_locations_csv,
+    build_summary_text,
     save_summary_report,
 )
 
@@ -241,23 +242,36 @@ else:
     # ── STEP 2: CLAUDE EXTRACTION ─────────────────────────────
     st.markdown("### 2 · AI Extraction")
 
-    with st.spinner(f"Sending to Claude ({skill['label']} skill)..."):
-        try:
-            extracted, raw_response = call_claude_extraction(
-                combined_text=combined_text,
-                system_prompt=skill["system_prompt"],
-                api_key=api_key,
-            )
-            st.session_state["extracted"] = extracted
-            st.session_state["raw_response"] = raw_response
-            st.session_state["all_files"] = all_files
-            st.session_state["folder_path"] = folder_path
-            st.session_state["folder_name"] = folder_name
-            st.session_state["skill"] = skill
-            st.success("Extraction complete")
-        except Exception as e:
-            st.error(f"Claude API error: {str(e)}")
-            st.stop()
+    # Only call Claude if no cached result for this folder + skill combination.
+    # This prevents re-calling the API every time a button is clicked.
+    _cache_key = f"{folder_path}|{class_choice}"
+
+    if st.session_state.get("extracted") and st.session_state.get("_cache_key") == _cache_key:
+        extracted   = st.session_state["extracted"]
+        all_files   = st.session_state["all_files"]
+        folder_path = st.session_state["folder_path"]
+        folder_name = st.session_state["folder_name"]
+        skill       = st.session_state["skill"]
+        st.success("Using cached extraction — change folder or skill to re-extract.")
+    else:
+        with st.spinner(f"Sending to Claude ({skill['label']} skill)..."):
+            try:
+                extracted, raw_response = call_claude_extraction(
+                    combined_text=combined_text,
+                    system_prompt=skill["system_prompt"],
+                    api_key=api_key,
+                )
+                st.session_state["extracted"]    = extracted
+                st.session_state["raw_response"] = raw_response
+                st.session_state["all_files"]    = all_files
+                st.session_state["folder_path"]  = folder_path
+                st.session_state["folder_name"]  = folder_name
+                st.session_state["skill"]        = skill
+                st.session_state["_cache_key"]   = _cache_key
+                st.success("Extraction complete")
+            except Exception as e:
+                st.error(f"Claude API error: {str(e)}")
+                st.stop()
 
     # ── STEP 3: GAP ANALYSIS ──────────────────────────────────
     st.markdown("### 3 · Gap Analysis")
@@ -321,11 +335,12 @@ else:
 
     # Build tab labels — active skill tabs + fixed tabs
     _tab_labels = [f"{tc.icon} {tc.section.value}" for tc in _active_tabs]
-    _tab_labels += ["📊 Claims CSV", "🔍 Raw JSON"]
+    _tab_labels += ["📋 Summary", "📊 Claims CSV", "🔍 Raw JSON"]
 
     _tabs = st.tabs(_tab_labels)
-    _claims_tab_idx = len(_active_tabs)
-    _json_tab_idx   = len(_active_tabs) + 1
+    _summary_tab_idx = len(_active_tabs)
+    _claims_tab_idx  = len(_active_tabs) + 1
+    _json_tab_idx    = len(_active_tabs) + 2
 
     # ── Render each active skill tab dynamically ──────────────
     import pandas as pd
@@ -603,6 +618,76 @@ else:
                                 f'<span class="{"field-missing" if _missing else "field-value"}">{_display if not _missing else "— not found"}</span>'
                                 f'</div>',
                                 unsafe_allow_html=True)
+
+    # ── Summary tab ──────────────────────────────────────────
+    with _tabs[_summary_tab_idx]:
+        _summary_text = build_summary_text(
+            extracted=extracted,
+            gap_analysis=gap,
+            source_files=all_files,
+            class_label=skill["label"],
+            folder_name=folder_name,
+        )
+
+        # Render plain-text report as styled markdown
+        def _render_summary_as_markdown(text: str):
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                # Section divider (===)
+                if line.startswith("==="):
+                    st.markdown("---")
+                # Section divider (---)
+                elif line.startswith("---"):
+                    pass  # already separated by headers
+                # Main title
+                elif line == "PINE WALK PRICING — AI SUBMISSION SUMMARY":
+                    st.markdown(f"## 🏢 {line}")
+                # Section headers (ALL CAPS lines)
+                elif line and line.isupper() and len(line) > 3 and not line.startswith("  "):
+                    st.markdown(f"### {line.title()}")
+                # Source file lines
+                elif line.startswith("[OK]") or line.startswith("[!!]"):
+                    icon = "✅" if line.startswith("[OK]") else "⚠️"
+                    st.markdown(
+                        f'<div style="font-size:0.82rem; color:#94A3B8; padding:2px 0;">'
+                        f'{icon} {line[4:].strip()}</div>',
+                        unsafe_allow_html=True)
+                # Key-value lines (two or more spaces between label and value)
+                elif "  " in line and not line.startswith("•") and not line.startswith("-"):
+                    parts = line.split(None, 1)
+                    if len(parts) == 2:
+                        label, val = parts[0], parts[1].strip()
+                        val_color = "#94A3B8" if val in ("NOT PROVIDED", "") else "#E2E8F0"
+                        st.markdown(
+                            f'<div class="field-row">'
+                            f'<span class="field-label">{label}</span>'
+                            f'<span class="field-value" style="color:{val_color};">{val}</span>'
+                            f'</div>',
+                            unsafe_allow_html=True)
+                    else:
+                        if line:
+                            st.markdown(f'<div style="font-size:0.83rem; color:#CBD5E1; padding:2px 0;">{line}</div>', unsafe_allow_html=True)
+                # Bullet / flag lines
+                elif line.startswith("•") or line.startswith("-") or line.startswith("["):
+                    color = "#EF4444" if "[RED]" in line else "#F59E0B" if "[AMBER]" in line else "#94A3B8"
+                    st.markdown(
+                        f'<div style="font-size:0.82rem; color:{color}; padding:2px 0 2px 8px;">{line}</div>',
+                        unsafe_allow_html=True)
+                # Metadata lines (Class:, Case Folder: etc.)
+                elif ":" in line and line.split(":")[0].strip() in ("Class", "Case Folder", "Generated", "Data Quality"):
+                    k, v = line.split(":", 1)
+                    st.markdown(
+                        f'<div style="font-size:0.82rem; color:#64748B; padding:1px 0;">'
+                        f'<span style="color:#475569;">{k}:</span> {v.strip()}</div>',
+                        unsafe_allow_html=True)
+                # Any other non-empty line
+                elif line:
+                    st.markdown(
+                        f'<div style="font-size:0.83rem; color:#CBD5E1; padding:2px 0;">{line}</div>',
+                        unsafe_allow_html=True)
+
+        _render_summary_as_markdown(_summary_text)
+        st.caption("Preview only — use **Save** below to write to file.")
 
     # ── Claims CSV tab ────────────────────────────────────────
     with _tabs[_claims_tab_idx]:

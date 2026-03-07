@@ -125,6 +125,19 @@ with st.sidebar:
     use_corr  = st.checkbox("01_correspondence (emails / docs)", value=True)
     use_data  = st.checkbox("02_data (attachments / data files)", value=True)
 
+    st.markdown("---")
+    st.markdown("### 📂 Submission Mode")
+    batch_mode = st.toggle(
+        "Multiple Submissions",
+        value=False,
+        help="Process a parent folder containing multiple submission subfolders.",
+    )
+    if batch_mode:
+        st.caption("Point the folder path at the **parent** folder. Each subfolder will be treated as one submission.")
+        force_rerun = st.checkbox("Re-run all (ignore cache)", value=False)
+    else:
+        force_rerun = False
+
     # ── TAB SELECTOR ─────────────────────────────────────────
     st.markdown("---")
     st.markdown("### 📑 Display Tabs")
@@ -152,8 +165,11 @@ with st.sidebar:
     st.session_state["tab_states"] = _tab_states
 
     st.markdown("---")
-    if st.button("▶ Run Analysis", type="primary", use_container_width=True):
+    _btn_label = "▶ Run Batch" if st.session_state.get("batch_mode_ui") else "▶ Run Analysis"
+    if st.button(_btn_label, type="primary", use_container_width=True):
         st.session_state["run_triggered"] = True
+        st.session_state["batch_mode_ui"] = batch_mode
+        st.session_state["force_rerun_ui"] = force_rerun
 
     run_button = st.session_state.get("run_triggered", False)
 
@@ -177,120 +193,28 @@ if not run_button:
 - **Rating Model CSV** → saved to `02_data/submission_data.csv` (appends each run)
     """)
 
-else:
-    # ── VALIDATION ────────────────────────────────────────────
-    errors = []
-    if not api_key:
-        errors.append("API key is required.")
-    if not folder_path:
-        errors.append("Case folder path is required.")
-    elif not os.path.exists(folder_path):
-        errors.append(f"Folder not found: `{folder_path}`")
+# ─────────────────────────────────────────────────────────────────────
+# RENDER RESULTS  — shared by single + batch mode
+# ─────────────────────────────────────────────────────────────────────
 
-    if errors:
-        for e in errors:
-            st.error(e)
-        st.stop()
+def render_results(extracted, gap, all_files, folder_path, folder_name, skill, output_folder=None):
+    """Render gap analysis, data tabs, and save section for one submission.
+    output_folder: where outputs are saved (defaults to folder_path).
+    In batch mode, pass the parent folder to consolidate CSVs."""
+    import pandas as pd
+    if output_folder is None:
+        output_folder = folder_path
 
-    skill = get_skill(class_choice)
-    folder_name = os.path.basename(folder_path.rstrip("\\/"))
-
-    # ── STEP 1: FILE EXTRACTION ───────────────────────────────
-    st.markdown("### 1 · Reading Submission Files")
-
-    all_files = {}
-    if use_corr:
-        corr_files = extract_folder(folder_path, "01_correspondence")
-        all_files.update(corr_files)
-    if use_data:
-        data_files = extract_folder(folder_path, "02_data")
-        # Exclude any existing AI summary or CSV to avoid circular references
-        data_files = {
-            k: v for k, v in data_files.items()
-            if not k.endswith("AI_Summary.txt") and not k.endswith(".csv")
-        }
-        all_files.update(data_files)
-
-    if not all_files:
-        st.error("No supported files found in the selected subfolders.")
-        st.stop()
-
-    file_cols = st.columns(min(len(all_files), 4))
-    for i, (fname, info) in enumerate(all_files.items()):
-        with file_cols[i % 4]:
-            icon = "✅" if info["text"] else "⚠️"
-            st.metric(
-                label=f"{icon} {fname}",
-                value=f"{info['size_kb']} KB",
-                delta=info["status"][:50] if info["status"] else "No text extracted",
-            )
-
-    # Combine all extracted text
-    combined_parts = []
-    for fname, info in all_files.items():
-        if info["text"]:
-            combined_parts.append(f"\n\n{'='*50}\nFILE: {fname}\n{'='*50}\n{info['text']}")
-
-    combined_text = "\n".join(combined_parts)
-
-    if not combined_text.strip():
-        st.error("No text could be extracted from any files. Check file formats.")
-        st.stop()
-
-    st.success(f"Extracted {len(combined_text):,} characters from {len(all_files)} file(s)")
-
-    # ── STEP 2: CLAUDE EXTRACTION ─────────────────────────────
-    st.markdown("### 2 · AI Extraction")
-
-    # Only call Claude if no cached result for this folder + skill combination.
-    # This prevents re-calling the API every time a button is clicked.
-    _cache_key = f"{folder_path}|{class_choice}"
-
-    if st.session_state.get("extracted") and st.session_state.get("_cache_key") == _cache_key:
-        extracted   = st.session_state["extracted"]
-        all_files   = st.session_state["all_files"]
-        folder_path = st.session_state["folder_path"]
-        folder_name = st.session_state["folder_name"]
-        skill       = st.session_state["skill"]
-        st.success("Using cached extraction — change folder or skill to re-extract.")
-    else:
-        with st.spinner(f"Sending to Claude ({skill['label']} skill)..."):
-            try:
-                extracted, raw_response = call_claude_extraction(
-                    combined_text=combined_text,
-                    system_prompt=skill["system_prompt"],
-                    api_key=api_key,
-                )
-                st.session_state["extracted"]    = extracted
-                st.session_state["raw_response"] = raw_response
-                st.session_state["all_files"]    = all_files
-                st.session_state["folder_path"]  = folder_path
-                st.session_state["folder_name"]  = folder_name
-                st.session_state["skill"]        = skill
-                st.session_state["_cache_key"]   = _cache_key
-                st.success("Extraction complete")
-            except Exception as e:
-                st.error(f"Claude API error: {str(e)}")
-                st.stop()
-
-    # ── STEP 3: GAP ANALYSIS ──────────────────────────────────
     st.markdown("### 3 · Gap Analysis")
-
-    # Load from session_state so save button works after rerun
-    extracted    = st.session_state.get("extracted", extracted)
-    all_files    = st.session_state.get("all_files", all_files)
-    folder_path  = st.session_state.get("folder_path", folder_path)
-    folder_name  = st.session_state.get("folder_name", folder_name)
-    skill        = st.session_state.get("skill", skill)
 
     gap = run_gap_analysis(extracted, skill["required_fields"])
 
-    # Score display
-    score = gap["data_quality_score"]
+    score       = gap["data_quality_score"]
     score_color = "#22C55E" if score >= 75 else "#F59E0B" if score >= 50 else "#EF4444"
     score_label = "GOOD" if score >= 75 else "MODERATE" if score >= 50 else "POOR"
 
     col_score, col_crit, col_adv, col_ok = st.columns(4)
+
     with col_score:
         st.markdown(f"""
         <div style="text-align:center; padding:12px; background:#111827; border-radius:6px; border:1px solid #1E2D45;">
@@ -733,13 +657,13 @@ else:
                     gap_analysis=gap,
                     source_files=all_files,
                     class_label=skill["label"],
-                    output_folder=folder_path,
+                    output_folder=output_folder,
                     folder_name=folder_name,
                 )
                 csv_path = save_csv(
                     row=csv_row,
                     csv_schema=skill["csv_schema"],
-                    output_folder=folder_path,
+                    output_folder=output_folder,
                     filename_prefix="submission_data",
                 )
                 claims_path = ""
@@ -747,7 +671,7 @@ else:
                     claims_path = save_claims_csv(
                         rows=claims_rows,
                         claims_csv_schema=skill["claims_csv_schema"],
-                        output_folder=folder_path,
+                        output_folder=output_folder,
                     )
                 # Save locations CSV if skill has SOV data (terror/PV)
                 locs_path = ""
@@ -758,7 +682,7 @@ else:
                             locs_path = save_locations_csv(
                                 rows=_loc_rows,
                                 schema=_loc_schema,
-                                output_folder=folder_path,
+                                output_folder=output_folder,
                             )
                     except Exception:
                         pass  # locations CSV is best-effort
@@ -769,8 +693,6 @@ else:
                     st.success(f"✅ Claims CSV saved:\n`{claims_path}`")
                 if locs_path:
                     st.success(f"✅ Locations CSV saved:\n`{locs_path}`")
-            except Exception as e:
-                st.error(f"Save failed: {str(e)}")
             except Exception as e:
                 st.error(f"Save failed: {str(e)}")
 
@@ -787,3 +709,260 @@ else:
     if extracted.get("extraction_notes"):
         st.markdown("---")
         st.info(f"**Extraction Note:** {extracted['extraction_notes']}")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# SINGLE MODE RUNNER
+# ─────────────────────────────────────────────────────────────────────
+
+def run_single(folder_path, class_choice, api_key, use_corr, use_data, force_rerun):
+    skill       = get_skill(class_choice)
+    folder_name = os.path.basename(folder_path.rstrip("\\/"))
+
+    st.markdown("### 1 · Reading Submission Files")
+    all_files = {}
+    if use_corr:
+        all_files.update(extract_folder(folder_path, "01_correspondence"))
+    if use_data:
+        data_files = extract_folder(folder_path, "02_data")
+        data_files = {k: v for k, v in data_files.items()
+                      if not k.endswith("AI_Summary.txt") and not k.endswith(".csv")}
+        all_files.update(data_files)
+
+    if not all_files:
+        st.error("No supported files found in the selected subfolders.")
+        return
+
+    file_cols = st.columns(min(len(all_files), 4))
+    for i, (fname, info) in enumerate(all_files.items()):
+        with file_cols[i % 4]:
+            icon = "✅" if info["text"] else "⚠️"
+            st.metric(label=f"{icon} {fname}", value=f"{info['size_kb']} KB",
+                      delta=info["status"][:50] if info["status"] else "No text extracted")
+
+    combined_parts = [f"\n\n{'='*50}\nFILE: {fname}\n{'='*50}\n{info['text']}"
+                      for fname, info in all_files.items() if info["text"]]
+    combined_text = "\n".join(combined_parts)
+
+    if not combined_text.strip():
+        st.error("No text could be extracted from any files.")
+        return
+
+    st.success(f"Extracted {len(combined_text):,} characters from {len(all_files)} file(s)")
+
+    st.markdown("### 2 · AI Extraction")
+    _cache_key = f"{folder_path}|{class_choice}"
+    if not force_rerun and st.session_state.get("extracted") and st.session_state.get("_cache_key") == _cache_key:
+        extracted   = st.session_state["extracted"]
+        all_files   = st.session_state["all_files"]
+        skill       = st.session_state["skill"]
+        st.success("Using cached extraction — change folder or skill to re-extract.")
+    else:
+        with st.spinner(f"Sending to Claude ({skill['label']} skill)..."):
+            try:
+                extracted, _ = call_claude_extraction(combined_text, skill["system_prompt"], api_key)
+                st.session_state["extracted"]  = extracted
+                st.session_state["all_files"]  = all_files
+                st.session_state["folder_path"]= folder_path
+                st.session_state["folder_name"]= folder_name
+                st.session_state["skill"]      = skill
+                st.session_state["_cache_key"] = _cache_key
+                st.success("Extraction complete")
+            except Exception as e:
+                st.error(f"Claude API error: {str(e)}")
+                return
+
+    gap = run_gap_analysis(extracted, skill["required_fields"])
+    render_results(extracted, gap, all_files, folder_path, folder_name, skill)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# BATCH MODE RUNNER
+# ─────────────────────────────────────────────────────────────────────
+
+def run_batch(parent_folder, class_choice, api_key, use_corr, use_data, force_rerun):
+    """
+    Discover all immediate subfolders of parent_folder,
+    process each as a submission, save CSVs to parent/submission_tool_auto_outputs,
+    store results in session_state for navigation.
+    """
+    # Discover subfolders (immediate children only, ignore hidden and output folder)
+    try:
+        subfolders = sorted([
+            d for d in os.listdir(parent_folder)
+            if os.path.isdir(os.path.join(parent_folder, d))
+            and not d.startswith(".")
+            and d != "submission_tool_auto_outputs"
+        ])
+    except Exception as e:
+        st.error(f"Cannot read folder: {e}")
+        return
+
+    if not subfolders:
+        st.error("No subfolders found in the selected parent folder.")
+        return
+
+    skill = get_skill(class_choice)
+
+    st.markdown(f"### Found {len(subfolders)} submission folder(s)")
+    st.caption("CSVs will be consolidated into the parent folder's `submission_tool_auto_outputs`.")
+
+    # ── Progress run ─────────────────────────────────────────
+    batch_results = st.session_state.get("batch_results", {})
+    _cache_key_batch = f"BATCH|{parent_folder}|{class_choice}"
+    already_run = (not force_rerun
+                   and st.session_state.get("_cache_key_batch") == _cache_key_batch
+                   and batch_results)
+
+    if already_run:
+        st.success(f"Using cached batch results ({len(batch_results)} submissions). Change folder or skill to re-run.")
+    else:
+        batch_results = {}
+        progress_bar = st.progress(0, text="Starting batch...")
+        status_area  = st.empty()
+
+        for idx, subfolder_name in enumerate(subfolders):
+            subfolder_path = os.path.join(parent_folder, subfolder_name)
+            progress_pct   = int((idx / len(subfolders)) * 100)
+            progress_bar.progress(progress_pct, text=f"Processing {subfolder_name} ({idx+1}/{len(subfolders)})...")
+            status_area.info(f"🔄 **{subfolder_name}** — reading files...")
+
+            # Read files
+            all_files = {}
+            if use_corr:
+                all_files.update(extract_folder(subfolder_path, "01_correspondence"))
+            if use_data:
+                df = extract_folder(subfolder_path, "02_data")
+                df = {k: v for k, v in df.items()
+                      if not k.endswith("AI_Summary.txt") and not k.endswith(".csv")}
+                all_files.update(df)
+
+            if not all_files:
+                status_area.warning(f"⚠️ {subfolder_name} — no files found, skipping.")
+                batch_results[subfolder_name] = {"error": "No files found", "folder_path": subfolder_path}
+                continue
+
+            combined_parts = [f"\n\n{'='*50}\nFILE: {fname}\n{'='*50}\n{info['text']}"
+                              for fname, info in all_files.items() if info["text"]]
+            combined_text = "\n".join(combined_parts)
+
+            if not combined_text.strip():
+                status_area.warning(f"⚠️ {subfolder_name} — no text extractable, skipping.")
+                batch_results[subfolder_name] = {"error": "No text extracted", "folder_path": subfolder_path}
+                continue
+
+            # Claude extraction
+            status_area.info(f"🤖 **{subfolder_name}** — sending to Claude...")
+            try:
+                extracted, _ = call_claude_extraction(combined_text, skill["system_prompt"], api_key)
+            except Exception as e:
+                status_area.error(f"❌ {subfolder_name} — Claude error: {e}")
+                batch_results[subfolder_name] = {"error": str(e), "folder_path": subfolder_path}
+                continue
+
+            gap = run_gap_analysis(extracted, skill["required_fields"])
+
+            # Auto-save CSVs to parent folder (consolidated)
+            status_area.info(f"💾 **{subfolder_name}** — saving outputs...")
+            try:
+                save_summary_report(extracted, gap, all_files, skill["label"], subfolder_path, subfolder_name)
+                csv_row = build_csv_row(extracted, gap, skill["csv_schema"], subfolder_path, skill["label"])
+                # Per-submission: save to subfolder/submission_tool_auto_outputs/
+                save_csv(csv_row, skill["csv_schema"], subfolder_path, "submission_data")
+                claims_rows = build_claims_csv_rows(extracted, skill.get("claims_csv_schema", []))
+                if claims_rows:
+                    save_claims_csv(claims_rows, skill["claims_csv_schema"], subfolder_path)
+                if extracted.get("sov_locations") is not None or extracted.get("tiv_total"):
+                    loc_rows, loc_schema = build_locations_csv_rows(extracted)
+                    if loc_rows:
+                        save_locations_csv(loc_rows, loc_schema, subfolder_path)
+                # Consolidated roll-up: also append to parent/submission_tool_auto_outputs/
+                save_csv(csv_row, skill["csv_schema"], parent_folder, "submission_data_all")
+                if claims_rows:
+                    save_claims_csv(claims_rows, skill["claims_csv_schema"], parent_folder)
+            except Exception as e:
+                st.warning(f"⚠️ {subfolder_name} — save error: {e}")
+
+            batch_results[subfolder_name] = {
+                "extracted":   extracted,
+                "gap":         gap,
+                "all_files":   all_files,
+                "folder_path": subfolder_path,
+                "folder_name": subfolder_name,
+            }
+
+        progress_bar.progress(100, text="Batch complete ✅")
+        status_area.empty()
+
+        st.session_state["batch_results"]     = batch_results
+        st.session_state["_cache_key_batch"]  = _cache_key_batch
+
+    # ── Results summary table ────────────────────────────────
+    st.markdown("### Batch Results")
+    summary_rows = []
+    for name, res in batch_results.items():
+        if "error" in res:
+            summary_rows.append({"Folder": name, "Status": f"❌ {res['error']}", "Quality": "—", "Critical Gaps": "—", "Insured": "—"})
+        else:
+            g = res["gap"]
+            summary_rows.append({
+                "Folder":        name,
+                "Status":        "✅ OK",
+                "Quality":       g["data_quality_score"],
+                "Critical Gaps": g["critical_count"],
+                "Insured":       res["extracted"].get("insured_name") or "—",
+            })
+    import pandas as pd
+    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+    # ── Per-submission viewer ────────────────────────────────
+    ok_results = {k: v for k, v in batch_results.items() if "error" not in v}
+    if not ok_results:
+        st.warning("No submissions processed successfully.")
+        return
+
+    st.markdown("---")
+    st.markdown("### 📂 View Submission")
+    selected = st.selectbox(
+        "Select submission to review",
+        options=list(ok_results.keys()),
+        key="batch_selected_submission",
+    )
+
+    if selected:
+        res = ok_results[selected]
+        st.markdown(f"#### {selected}")
+        render_results(
+            extracted=res["extracted"],
+            gap=res["gap"],
+            all_files=res["all_files"],
+            folder_path=res["folder_path"],
+            folder_name=res["folder_name"],
+            skill=skill,
+            output_folder=parent_folder,
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# MAIN DISPATCH
+# ─────────────────────────────────────────────────────────────────────
+
+if run_button:
+    # Validate inputs
+    if not api_key:
+        st.error("API key is required.")
+        st.stop()
+    if not folder_path:
+        st.error("Folder path is required.")
+        st.stop()
+    if not os.path.exists(folder_path):
+        st.error(f"Folder not found: `{folder_path}`")
+        st.stop()
+
+    _batch = st.session_state.get("batch_mode_ui", False)
+    _force = st.session_state.get("force_rerun_ui", False)
+
+    if _batch:
+        run_batch(folder_path, class_choice, api_key, use_corr, use_data, _force)
+    else:
+        run_single(folder_path, class_choice, api_key, use_corr, use_data, _force)

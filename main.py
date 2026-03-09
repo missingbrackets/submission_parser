@@ -38,169 +38,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── CUSTOM CSS ────────────────────────────────────────────────
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
-    
-    html, body, [class*="css"] { font-family: 'DM Mono', monospace; }
-    
-    .main-header {
-        background: #0B0F1A;
-        color: #00C2FF;
-        padding: 18px 24px 12px;
-        border-bottom: 2px solid #00C2FF;
-        margin: -1rem -1rem 1.5rem -1rem;
-        font-family: 'DM Mono', monospace;
-    }
-    .main-header h1 { color: #fff; font-size: 1.4rem; margin: 0; letter-spacing: 0.1em; }
-    .main-header p  { color: #6B7B99; font-size: 0.75rem; margin: 4px 0 0; }
-
-    .gap-critical {
-        background: #2A1215; border-left: 3px solid #EF4444;
-        padding: 6px 10px; margin: 3px 0; border-radius: 2px;
-        font-size: 0.8rem; color: #FCA5A5;
-    }
-    .gap-advisory {
-        background: #2A1F0A; border-left: 3px solid #F59E0B;
-        padding: 6px 10px; margin: 3px 0; border-radius: 2px;
-        font-size: 0.8rem; color: #FCD34D;
-    }
-    .gap-ok {
-        background: #0A2A14; border-left: 3px solid #22C55E;
-        padding: 6px 10px; margin: 3px 0; border-radius: 2px;
-        font-size: 0.8rem; color: #86EFAC;
-    }
-    .field-row {
-        display: flex; justify-content: space-between;
-        padding: 4px 0; border-bottom: 1px solid #1E2D45;
-        font-size: 0.8rem;
-    }
-    .field-label { color: #6B7B99; }
-    .field-value { color: #E2E8F0; font-weight: 500; }
-    .field-missing { color: #EF4444; font-style: italic; }
-
-    .score-badge {
-        display: inline-block; padding: 4px 14px;
-        border-radius: 20px; font-weight: 700; font-size: 1.1rem;
-    }
-    div[data-testid="stExpander"] { border: 1px solid #1E2D45 !important; }
-</style>
-""", unsafe_allow_html=True)
-
-# ── HEADER ────────────────────────────────────────────────────
-st.markdown("""
-<div class="main-header">
-  <h1>SUBMISSION ANALYSER</h1>
-  <p>AI-powered extraction · Gap analysis · Rating model data</p>
-</div>
-""", unsafe_allow_html=True)
-
-# ── SIDEBAR ───────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### ⚙️ Configuration")
-
-    api_key = st.text_input(
-        "Anthropic API Key",
-        type="password",
-        placeholder="sk-ant-...",
-        help="Your Claude API key. Get one at console.anthropic.com",
-    )
-
-    st.markdown("---")
-    st.markdown("### 📁 Case Folder")
-
-    folder_path = st.text_input(
-        "Case folder path",
-        placeholder=r"T:\Actuarial\Pricing\MGAs\Sevanta\2026\01_Case Pricing\2026\20260303_Acme",
-        help="The root case folder (e.g. 20260303_InuredName). The app will read from 01_correspondence and 02_data subfolders.",
-    )
-
-    st.markdown("---")
-    st.markdown("### 📚 Class of Business")
-    class_choice = st.selectbox(
-        "Select skill / class template",
-        options=available_classes(),
-        help="Determines the required field checklist and CSV schema",
-    )
-
-    st.markdown("---")
-    st.markdown("### 🔍 Source Subfolders")
-    use_corr  = st.checkbox("01_correspondence (emails / docs)", value=True)
-    use_data  = st.checkbox("02_data (attachments / data files)", value=True)
-
-    st.markdown("---")
-    st.markdown("### 📂 Submission Mode")
-    batch_mode = st.toggle(
-        "Multiple Submissions",
-        value=False,
-        help="Process a parent folder containing multiple submission subfolders.",
-    )
-    if batch_mode:
-        st.caption("Point the folder path at the **parent** folder. Each subfolder will be treated as one submission.")
-        force_rerun = st.checkbox("Re-run all (ignore cache)", value=False)
-    else:
-        force_rerun = False
-
-    # ── TAB SELECTOR ─────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("### 📑 Display Tabs")
-    st.caption("Choose which tabs to show after analysis.")
-
-    _skill_preview = get_skill(class_choice)
-    _tab_configs   = _skill_preview["skill_class"].tab_config()
-
-    # Always-present tabs (not toggleable)
-    _fixed_tabs = ["📊 Claims CSV", "🔍 Raw JSON"]
-
-    # Build checkbox state — stored in session so they persist across reruns
-    _tab_states = {}
-    for tc in _tab_configs:
-        _key = f"tab_show_{tc.section.name}"
-        _default = st.session_state.get(_key, tc.default_on)
-        _checked = st.checkbox(
-            f"{tc.icon} {tc.section.value}",
-            value=_default,
-            key=_key,
-            help=tc.description or tc.section.value,
-        )
-        _tab_states[tc.section.name] = _checked
-
-    st.session_state["tab_states"] = _tab_states
-
-    st.markdown("---")
-    _btn_label = "▶ Run Batch" if st.session_state.get("batch_mode_ui") else "▶ Run Analysis"
-    if st.button(_btn_label, type="primary", use_container_width=True):
-        st.session_state["run_triggered"] = True
-        st.session_state["batch_mode_ui"] = batch_mode
-        st.session_state["force_rerun_ui"] = force_rerun
-
-    run_button = st.session_state.get("run_triggered", False)
-
-# ── MAIN AREA ─────────────────────────────────────────────────
-
-if not run_button:
-    # ── Welcome state ─────────────────────────────────────────
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.info("**Step 1**\n\nEnter your API key and the case folder path in the sidebar.")
-    with col2:
-        st.info("**Step 2**\n\nSelect the class of business to apply the right skill template.")
-    with col3:
-        st.info("**Step 3**\n\nClick **Run Analysis** — outputs are saved to the case folder.")
-
-    st.markdown("---")
-    st.markdown("#### What this tool produces")
-    st.markdown("""
-- **AI Summary Report** → saved to `01_correspondence/YYYYMMDD_AI_Summary.txt`
-- **Gap Analysis** → critical and advisory missing fields, colour-coded
-- **Rating Model CSV** → saved to `02_data/submission_data.csv` (appends each run)
-    """)
-
-# ─────────────────────────────────────────────────────────────────────
-# RENDER RESULTS  — shared by single + batch mode
-# ─────────────────────────────────────────────────────────────────────
-
 def render_results(extracted, gap, all_files, folder_path, folder_name, skill, output_folder=None):
     """Render gap analysis, data tabs, and save section for one submission.
     output_folder: where outputs are saved (defaults to folder_path).
@@ -974,26 +811,200 @@ def run_batch(parent_folder, class_choice, api_key, use_corr, use_data, force_re
         )
 
 
-# ─────────────────────────────────────────────────────────────────────
-# MAIN DISPATCH
-# ─────────────────────────────────────────────────────────────────────
 
-if run_button:
-    # Validate inputs
-    if not api_key:
-        st.error("API key is required.")
-        st.stop()
-    if not folder_path:
-        st.error("Folder path is required.")
-        st.stop()
-    if not os.path.exists(folder_path):
-        st.error(f"Folder not found: `{folder_path}`")
-        st.stop()
 
-    _batch = st.session_state.get("batch_mode_ui", False)
-    _force = st.session_state.get("force_rerun_ui", False)
+def _main_page():
 
-    if _batch:
-        run_batch(folder_path, class_choice, api_key, use_corr, use_data, _force)
-    else:
-        run_single(folder_path, class_choice, api_key, use_corr, use_data, _force)
+    # ── CUSTOM CSS ────────────────────────────────────────────────
+    st.markdown("""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
+    
+        html, body, [class*="css"] { font-family: 'DM Mono', monospace; }
+    
+        .main-header {
+            background: #0B0F1A;
+            color: #00C2FF;
+            padding: 18px 24px 12px;
+            border-bottom: 2px solid #00C2FF;
+            margin: -1rem -1rem 1.5rem -1rem;
+            font-family: 'DM Mono', monospace;
+        }
+        .main-header h1 { color: #fff; font-size: 1.4rem; margin: 0; letter-spacing: 0.1em; }
+        .main-header p  { color: #6B7B99; font-size: 0.75rem; margin: 4px 0 0; }
+
+        .gap-critical {
+            background: #2A1215; border-left: 3px solid #EF4444;
+            padding: 6px 10px; margin: 3px 0; border-radius: 2px;
+            font-size: 0.8rem; color: #FCA5A5;
+        }
+        .gap-advisory {
+            background: #2A1F0A; border-left: 3px solid #F59E0B;
+            padding: 6px 10px; margin: 3px 0; border-radius: 2px;
+            font-size: 0.8rem; color: #FCD34D;
+        }
+        .gap-ok {
+            background: #0A2A14; border-left: 3px solid #22C55E;
+            padding: 6px 10px; margin: 3px 0; border-radius: 2px;
+            font-size: 0.8rem; color: #86EFAC;
+        }
+        .field-row {
+            display: flex; justify-content: space-between;
+            padding: 4px 0; border-bottom: 1px solid #1E2D45;
+            font-size: 0.8rem;
+        }
+        .field-label { color: #6B7B99; }
+        .field-value { color: #E2E8F0; font-weight: 500; }
+        .field-missing { color: #EF4444; font-style: italic; }
+
+        .score-badge {
+            display: inline-block; padding: 4px 14px;
+            border-radius: 20px; font-weight: 700; font-size: 1.1rem;
+        }
+        div[data-testid="stExpander"] { border: 1px solid #1E2D45 !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ── HEADER ────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="main-header">
+      <h1>SUBMISSION ANALYSER</h1>
+      <p>AI-powered extraction · Gap analysis · Rating model data</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── SIDEBAR ───────────────────────────────────────────────────
+    with st.sidebar:
+        st.markdown("### ⚙️ Configuration")
+
+        api_key = st.text_input(
+            "Anthropic API Key",
+            type="password",
+            placeholder="sk-ant-...",
+            help="Your Claude API key. Get one at console.anthropic.com",
+        )
+
+        st.markdown("---")
+        st.markdown("### 📁 Case Folder")
+
+        folder_path = st.text_input(
+            "Case folder path",
+            placeholder=r"T:\Actuarial\Pricing\MGAs\Sevanta\2026\01_Case Pricing\2026\20260303_Acme",
+            help="The root case folder (e.g. 20260303_InuredName). The app will read from 01_correspondence and 02_data subfolders.",
+        )
+
+        st.markdown("---")
+        st.markdown("### 📚 Class of Business")
+        class_choice = st.selectbox(
+            "Select skill / class template",
+            options=available_classes(),
+            help="Determines the required field checklist and CSV schema",
+        )
+
+        st.markdown("---")
+        st.markdown("### 🔍 Source Subfolders")
+        use_corr  = st.checkbox("01_correspondence (emails / docs)", value=True)
+        use_data  = st.checkbox("02_data (attachments / data files)", value=True)
+
+        st.markdown("---")
+        st.markdown("### 📂 Submission Mode")
+        batch_mode = st.toggle(
+            "Multiple Submissions",
+            value=False,
+            help="Process a parent folder containing multiple submission subfolders.",
+        )
+        if batch_mode:
+            st.caption("Point the folder path at the **parent** folder. Each subfolder will be treated as one submission.")
+            force_rerun = st.checkbox("Re-run all (ignore cache)", value=False)
+        else:
+            force_rerun = False
+
+        # ── TAB SELECTOR ─────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 📑 Display Tabs")
+        st.caption("Choose which tabs to show after analysis.")
+
+        _skill_preview = get_skill(class_choice)
+        _tab_configs   = _skill_preview["skill_class"].tab_config()
+
+        # Always-present tabs (not toggleable)
+        _fixed_tabs = ["📊 Claims CSV", "🔍 Raw JSON"]
+
+        # Build checkbox state — stored in session so they persist across reruns
+        _tab_states = {}
+        for tc in _tab_configs:
+            _key = f"tab_show_{tc.section.name}"
+            _default = st.session_state.get(_key, tc.default_on)
+            _checked = st.checkbox(
+                f"{tc.icon} {tc.section.value}",
+                value=_default,
+                key=_key,
+                help=tc.description or tc.section.value,
+            )
+            _tab_states[tc.section.name] = _checked
+
+        st.session_state["tab_states"] = _tab_states
+
+        st.markdown("---")
+        _btn_label = "▶ Run Batch" if st.session_state.get("batch_mode_ui") else "▶ Run Analysis"
+        if st.button(_btn_label, type="primary", use_container_width=True):
+            st.session_state["run_triggered"] = True
+            st.session_state["batch_mode_ui"] = batch_mode
+            st.session_state["force_rerun_ui"] = force_rerun
+
+        run_button = st.session_state.get("run_triggered", False)
+
+    # ── MAIN AREA ─────────────────────────────────────────────────
+
+    if not run_button:
+        # ── Welcome state ─────────────────────────────────────────
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info("**Step 1**\n\nEnter your API key and the case folder path in the sidebar.")
+        with col2:
+            st.info("**Step 2**\n\nSelect the class of business to apply the right skill template.")
+        with col3:
+            st.info("**Step 3**\n\nClick **Run Analysis** — outputs are saved to the case folder.")
+
+        st.markdown("---")
+        st.markdown("#### What this tool produces")
+        st.markdown("""
+    - **AI Summary Report** → saved to `01_correspondence/YYYYMMDD_AI_Summary.txt`
+    - **Gap Analysis** → critical and advisory missing fields, colour-coded
+    - **Rating Model CSV** → saved to `02_data/submission_data.csv` (appends each run)
+        """)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # RENDER RESULTS  — shared by single + batch mode
+    # ─────────────────────────────────────────────────────────────────────
+
+    # ─────────────────────────────────────────────────────────────────────
+    # MAIN DISPATCH
+    # ─────────────────────────────────────────────────────────────────────
+
+    if run_button:
+        # Validate inputs
+        if not api_key:
+            st.error("API key is required.")
+            st.stop()
+        if not folder_path:
+            st.error("Folder path is required.")
+            st.stop()
+        if not os.path.exists(folder_path):
+            st.error(f"Folder not found: `{folder_path}`")
+            st.stop()
+
+        _batch = st.session_state.get("batch_mode_ui", False)
+        _force = st.session_state.get("force_rerun_ui", False)
+
+        if _batch:
+            run_batch(folder_path, class_choice, api_key, use_corr, use_data, _force)
+        else:
+            run_single(folder_path, class_choice, api_key, use_corr, use_data, _force)
+
+# ── NAVIGATION ───────────────────────────────────────────────
+pg = st.navigation([
+    st.Page(_main_page, title="Submission Analyser", icon="📋"),
+    st.Page("pages/1_Skill_Editor.py", title="Skill Editor", icon="⚙️"),
+])
+pg.run()

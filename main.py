@@ -26,6 +26,8 @@ from claude_caller import (
     save_triage_csv,
     build_triage_locations_rows,
     save_triage_locations_csv,
+    build_direct_triage_row,
+    save_direct_triage_csv,
     build_summary_text,
     save_summary_report,
 )
@@ -528,9 +530,10 @@ def render_results(extracted, gap, all_files, folder_path, folder_name, skill, o
                     except Exception:
                         pass  # best-effort
 
-                # Triage skill: also save triage_matrix.csv + triage_locations.csv
+                # Triage skills: save specialised triage CSVs
                 triage_path = ""
                 triage_locs_path = ""
+                direct_triage_path = ""
                 if skill.get("code") == "PVQ":
                     try:
                         _tr = build_triage_row(extracted, gap, output_folder, skill["label"])
@@ -540,6 +543,12 @@ def render_results(extracted, gap, all_files, folder_path, folder_name, skill, o
                             triage_locs_path = save_triage_locations_csv(_tl_rows, _tl_schema, output_folder)
                     except Exception as e:
                         st.warning(f"Triage CSV save error: {e}")
+                elif skill.get("code") == "PVDT":
+                    try:
+                        _dtr = build_direct_triage_row(extracted, gap, output_folder, skill["label"])
+                        direct_triage_path = save_direct_triage_csv(_dtr, output_folder)
+                    except Exception as e:
+                        st.warning(f"Direct triage CSV save error: {e}")
 
                 st.success(f"✅ Summary saved:\n`{summary_path}`")
                 st.success(f"✅ Submission CSV saved:\n`{csv_path}`")
@@ -551,6 +560,8 @@ def render_results(extracted, gap, all_files, folder_path, folder_name, skill, o
                     st.success(f"✅ Triage matrix saved:\n`{triage_path}`")
                 if triage_locs_path:
                     st.success(f"✅ Triage locations saved:\n`{triage_locs_path}`")
+                if direct_triage_path:
+                    st.success(f"✅ Direct triage matrix saved:\n`{direct_triage_path}`")
             except Exception as e:
                 st.error(f"Save failed: {str(e)}")
 
@@ -738,7 +749,7 @@ def run_batch(parent_folder, class_choice, api_key, use_corr, use_data, force_re
                 save_csv(csv_row, skill["csv_schema"], parent_folder, "submission_data_all")
                 if claims_rows:
                     save_claims_csv(claims_rows, skill["claims_csv_schema"], parent_folder)
-                # Triage skill: append to triage_matrix.csv + triage_locations.csv at parent
+                # Triage skills: append to triage CSVs at parent folder
                 if skill.get("code") == "PVQ":
                     try:
                         _tr = build_triage_row(extracted, gap, subfolder_path, skill["label"])
@@ -746,6 +757,12 @@ def run_batch(parent_folder, class_choice, api_key, use_corr, use_data, force_re
                         _tl_rows, _tl_schema = build_triage_locations_rows(extracted)
                         if _tl_rows:
                             save_triage_locations_csv(_tl_rows, _tl_schema, parent_folder)
+                    except Exception:
+                        pass  # best-effort
+                elif skill.get("code") == "PVDT":
+                    try:
+                        _dtr = build_direct_triage_row(extracted, gap, subfolder_path, skill["label"])
+                        save_direct_triage_csv(_dtr, parent_folder)
                     except Exception:
                         pass  # best-effort
             except Exception as e:

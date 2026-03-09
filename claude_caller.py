@@ -629,6 +629,113 @@ def save_triage_locations_csv(rows: list, schema: list,
     return filepath
 
 
+# ── DIRECT TRIAGE MATRIX CSV (PVDT skill) ─────────────────────
+
+# The 8 RAG flag field keys — used for counting and CSV output
+DIRECT_TRIAGE_FLAG_FIELDS = [
+    "flag_direct_to_market",
+    "flag_country_risk",
+    "flag_sanctions",
+    "flag_rate_adequacy",
+    "flag_data_completeness",
+    "flag_known_circumstances",
+    "flag_prior_declinatures",
+    "flag_structure_complexity",
+]
+
+DIRECT_TRIAGE_SCHEMA = [
+    "extraction_date", "source_folder", "class_of_business",
+    "triage_recommendation",
+    "n_red", "n_amber", "n_green",
+    "insured_name", "broker_name", "direct_to_market",
+    "insured_country", "risk_type", "territorial_scope",
+    "tiv_total", "tiv_currency", "location_count", "sov_provided",
+    "cover_type", "peril_war", "limit_aoo", "limit_currency", "excess_point",
+    "premium_sought_gross", "premium_currency", "commission_pct", "prior_premium",
+    "rate_on_line_pct", "rate_on_tiv_pct",
+    "policy_period_start", "policy_period_end", "renewal_or_new",
+    "flag_direct_to_market",
+    "flag_country_risk",
+    "flag_sanctions",
+    "flag_rate_adequacy",
+    "flag_data_completeness",
+    "flag_known_circumstances",
+    "flag_prior_declinatures",
+    "flag_structure_complexity",
+    "triage_rationale",
+]
+
+
+def _rag_colour(value: str) -> str:
+    """Return 'RED', 'AMBER', 'GREEN', or '' from a flag value string."""
+    v = str(value).upper()
+    if "🔴" in v or v.startswith("RED"):
+        return "RED"
+    if "🟡" in v or "AMBER" in v:
+        return "AMBER"
+    if "🟢" in v or "GREEN" in v:
+        return "GREEN"
+    return ""
+
+
+def build_direct_triage_row(extracted: dict, gap_analysis: dict,
+                             source_folder: str, class_label: str) -> dict:
+    """Build one row for triage_direct.csv from a PVDT extraction."""
+    row = {col: "" for col in DIRECT_TRIAGE_SCHEMA}
+    row["extraction_date"]   = datetime.date.today().isoformat()
+    row["source_folder"]     = os.path.basename(source_folder.rstrip("\\/"))
+    row["class_of_business"] = class_label
+
+    # Copy all scalar fields that appear in the schema
+    for key in DIRECT_TRIAGE_SCHEMA:
+        if key in extracted and extracted[key] is not None:
+            val = extracted[key]
+            if not isinstance(val, (list, dict)):
+                row[key] = _safe(val)
+
+    # Derived rates (calculated here; not sent by Claude)
+    try:
+        gross = float(_parse_amount(extracted.get("premium_sought_gross", "")))
+        limit = float(_parse_amount(extracted.get("limit_aoo", "")))
+        tiv   = float(_parse_amount(extracted.get("tiv_total", "")))
+        if limit > 0:
+            row["rate_on_line_pct"] = f"{round(gross / limit * 100, 4)}%"
+        if tiv > 0:
+            row["rate_on_tiv_pct"]  = f"{round(gross / tiv   * 100, 4)}%"
+    except (ValueError, TypeError):
+        pass
+
+    # Count RAG ratings across the 8 flag fields
+    n_red = n_amber = n_green = 0
+    for flag_key in DIRECT_TRIAGE_FLAG_FIELDS:
+        colour = _rag_colour(str(extracted.get(flag_key, "")))
+        if colour == "RED":
+            n_red   += 1
+        elif colour == "AMBER":
+            n_amber += 1
+        elif colour == "GREEN":
+            n_green += 1
+    row["n_red"]   = str(n_red)
+    row["n_amber"] = str(n_amber)
+    row["n_green"] = str(n_green)
+
+    return row
+
+
+def save_direct_triage_csv(row: dict, output_folder: str,
+                            filename: str = "triage_direct.csv") -> str:
+    """Append one row to triage_direct.csv — grows across runs."""
+    data_folder = _output_root(output_folder)
+    filepath    = os.path.join(data_folder, filename)
+    file_exists = os.path.exists(filepath)
+    with open(filepath, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=DIRECT_TRIAGE_SCHEMA)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+    return filepath
+
+
 # ── SAVE SUMMARY REPORT ───────────────────────────────────────
 def build_summary_text(
     extracted: dict,

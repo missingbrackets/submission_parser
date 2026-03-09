@@ -35,14 +35,6 @@ from skills.config_loader import (
     CSV_FILES,
 )
 
-# ── Page config ───────────────────────────────────────────────
-st.set_page_config(
-    page_title="Pine Walk — Skill Editor",
-    page_icon="⚙️",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
 # ── CSS — reuse main app palette ─────────────────────────────
 st.markdown("""
 <style>

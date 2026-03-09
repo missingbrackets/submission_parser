@@ -68,23 +68,14 @@ def get_skill_class(label: str) -> type:
 
 def get_skill(label: str) -> dict:
     """
-    Return skill config dict compatible with existing app code.
-    Keys: label, required_fields, csv_schema, claims_csv_schema,
-          system_prompt, skill_class
+    Return skill config dict, with any JSON sidecar overrides applied.
+    Shape identical to before — all existing call sites work unchanged.
+    Extra keys: 'config' (raw sidecar dict), 'has_overrides' (bool).
     """
-    cls = get_skill_class(label)
-    return {
-        "label":            cls.label(),
-        "code":             cls.code(),
-        "version":          cls.version(),
-        "description":      cls.description(),
-        "required_fields":  cls.required_fields(),
-        "csv_schema":       cls.csv_schema(),
-        "claims_csv_schema": cls.CLAIMS_SCHEMA,
-        "system_prompt":    cls.SYSTEM_PROMPT,
-        "output_schema":    cls.OUTPUT_SCHEMA,
-        "skill_class":      cls,
-    }
+    from skills.config_loader import load_config, apply_config
+    cls    = get_skill_class(label)
+    config = load_config(cls.code())
+    return apply_config(cls, config)
 
 
 def list_skills_doc() -> str:

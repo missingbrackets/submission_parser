@@ -1,7 +1,7 @@
 # ============================================================
 #  skills/terror.py
 #  Political Violence & Terrorism — London Market
-#  Pine Walk Pricing | Submission Analyser
+#  Pricing | Submission Analyser
 #
 #  Covers: T&S only, Full PV, War/Civil War extensions,
 #          PV Liability, BI/ICOW, all standard risk types:

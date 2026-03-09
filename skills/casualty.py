@@ -1,7 +1,7 @@
 # ============================================================
 #  skills/casualty.py
 #  Casualty Liability — London Market
-#  Pine Walk Pricing | Submission Analyser
+#  Submission Analyser
 #
 #  OUTPUT_SCHEMA is the single source of truth:
 #    - Defines every field Claude is asked to extract

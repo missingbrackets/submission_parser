@@ -1,5 +1,5 @@
 # ============================================================
-#  PINE WALK — Submission Analyser
+#  Submission Analyser
 #  Streamlit App  |  main.py
 #
 #  Run with:  streamlit run main.py
@@ -22,13 +22,17 @@ from claude_caller import (
     save_claims_csv,
     build_locations_csv_rows,
     save_locations_csv,
+    build_triage_row,
+    save_triage_csv,
+    build_triage_locations_rows,
+    save_triage_locations_csv,
     build_summary_text,
     save_summary_report,
 )
 
 # ── PAGE CONFIG ───────────────────────────────────────────────
 st.set_page_config(
-    page_title="Pine Walk — Submission Analyser",
+    page_title="Submission Analyser",
     page_icon="📋",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -87,7 +91,7 @@ st.markdown("""
 # ── HEADER ────────────────────────────────────────────────────
 st.markdown("""
 <div class="main-header">
-  <h1>PINE WALK &nbsp;|&nbsp; SUBMISSION ANALYSER</h1>
+  <h1>SUBMISSION ANALYSER</h1>
   <p>AI-powered extraction · Gap analysis · Rating model data</p>
 </div>
 """, unsafe_allow_html=True)
@@ -564,7 +568,7 @@ def render_results(extracted, gap, all_files, folder_path, folder_name, skill, o
                 elif line.startswith("---"):
                     pass  # already separated by headers
                 # Main title
-                elif line == "PINE WALK PRICING — AI SUBMISSION SUMMARY":
+                elif line == "PRICING — AI SUBMISSION SUMMARY":
                     st.markdown(f"## 🏢 {line}")
                 # Section headers (ALL CAPS lines)
                 elif line and line.isupper() and len(line) > 3 and not line.startswith("  "):
@@ -685,7 +689,20 @@ def render_results(extracted, gap, all_files, folder_path, folder_name, skill, o
                                 output_folder=output_folder,
                             )
                     except Exception:
-                        pass  # locations CSV is best-effort
+                        pass  # best-effort
+
+                # Triage skill: also save triage_matrix.csv + triage_locations.csv
+                triage_path = ""
+                triage_locs_path = ""
+                if skill.get("code") == "PVQ":
+                    try:
+                        _tr = build_triage_row(extracted, gap, output_folder, skill["label"])
+                        triage_path = save_triage_csv(_tr, output_folder)
+                        _tl_rows, _tl_schema = build_triage_locations_rows(extracted)
+                        if _tl_rows:
+                            triage_locs_path = save_triage_locations_csv(_tl_rows, _tl_schema, output_folder)
+                    except Exception as e:
+                        st.warning(f"Triage CSV save error: {e}")
 
                 st.success(f"✅ Summary saved:\n`{summary_path}`")
                 st.success(f"✅ Submission CSV saved:\n`{csv_path}`")
@@ -693,6 +710,10 @@ def render_results(extracted, gap, all_files, folder_path, folder_name, skill, o
                     st.success(f"✅ Claims CSV saved:\n`{claims_path}`")
                 if locs_path:
                     st.success(f"✅ Locations CSV saved:\n`{locs_path}`")
+                if triage_path:
+                    st.success(f"✅ Triage matrix saved:\n`{triage_path}`")
+                if triage_locs_path:
+                    st.success(f"✅ Triage locations saved:\n`{triage_locs_path}`")
             except Exception as e:
                 st.error(f"Save failed: {str(e)}")
 
@@ -876,10 +897,20 @@ def run_batch(parent_folder, class_choice, api_key, use_corr, use_data, force_re
                     loc_rows, loc_schema = build_locations_csv_rows(extracted)
                     if loc_rows:
                         save_locations_csv(loc_rows, loc_schema, subfolder_path)
-                # Consolidated roll-up: also append to parent/submission_tool_auto_outputs/
+                # Consolidated roll-up: append to parent/submission_tool_auto_outputs/
                 save_csv(csv_row, skill["csv_schema"], parent_folder, "submission_data_all")
                 if claims_rows:
                     save_claims_csv(claims_rows, skill["claims_csv_schema"], parent_folder)
+                # Triage skill: append to triage_matrix.csv + triage_locations.csv at parent
+                if skill.get("code") == "PVQ":
+                    try:
+                        _tr = build_triage_row(extracted, gap, subfolder_path, skill["label"])
+                        save_triage_csv(_tr, parent_folder)
+                        _tl_rows, _tl_schema = build_triage_locations_rows(extracted)
+                        if _tl_rows:
+                            save_triage_locations_csv(_tl_rows, _tl_schema, parent_folder)
+                    except Exception:
+                        pass  # best-effort
             except Exception as e:
                 st.warning(f"⚠️ {subfolder_name} — save error: {e}")
 

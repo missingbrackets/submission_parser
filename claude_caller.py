@@ -268,7 +268,8 @@ def build_csv_row(
             row["large_losses_total"] = f"{len(large_losses)} identified"
 
     if isinstance(large_losses, list):
-        row["large_losses_flagged"] = "Y" if len(large_losses) > 0 else "N"
+        if "large_losses_flagged" in row:
+            row["large_losses_flagged"] = "Y" if len(large_losses) > 0 else "N"
 
     # ── UW flags summary
     uw_flags = [f for f in (extracted.get("uw_analyst_flags") or []) if isinstance(f, dict)]
@@ -282,8 +283,10 @@ def build_csv_row(
 
     # ── Gap analysis scores
     row["data_quality_score"]  = str(gap_analysis["data_quality_score"])
-    row["critical_gaps_count"] = str(gap_analysis["critical_count"])
-    row["advisory_gaps_count"] = str(gap_analysis["advisory_count"])
+    if "critical_gaps_count" in row:
+        row["critical_gaps_count"] = str(gap_analysis["critical_count"])
+    if "advisory_gaps_count" in row:
+        row["advisory_gaps_count"] = str(gap_analysis["advisory_count"])
 
     return row
 
@@ -492,6 +495,140 @@ def save_locations_csv(
     return filepath
 
 
+
+# ── TRIAGE MATRIX CSV ────────────────────────────────────────
+
+TRIAGE_SCHEMA = [
+    "extraction_date", "source_folder", "class_of_business",
+    "triage_recommendation", "triage_rationale",
+    "insured_name", "broker_name", "insured_country", "risk_type",
+    "territorial_scope", "location_count", "sov_provided",
+    "tiv_total", "tiv_currency",
+    "cover_type", "peril_war", "peril_pv_liability",
+    "limit_aoo", "limit_currency", "excess_point", "deductible",
+    "bi_covered", "bi_indemnity_period",
+    "premium_sought_gross", "premium_currency", "commission_pct",
+    "prior_premium", "rate_on_line_pct", "rate_on_tiv_pct", "implied_rate_change",
+    "policy_period_start", "policy_period_end", "renewal_or_new",
+    "country_risk", "sanctions_exposure",
+    "prior_declinatures", "known_circumstances", "large_losses_flag",
+    "loss_years_provided", "occurrence_hrs",
+    "data_quality_score", "extraction_confidence",
+    "red_flags", "amber_flags",
+]
+
+
+def build_triage_row(extracted: dict, gap_analysis: dict,
+                     source_folder: str, class_label: str) -> dict:
+    row = {col: "" for col in TRIAGE_SCHEMA}
+    row["extraction_date"]    = datetime.date.today().isoformat()
+    row["source_folder"]      = os.path.basename(source_folder.rstrip("\\/"))
+    row["class_of_business"]  = class_label
+    row["data_quality_score"] = str(gap_analysis.get("data_quality_score", ""))
+    for key in TRIAGE_SCHEMA:
+        if key in extracted and extracted[key] is not None:
+            val = extracted[key]
+            if not isinstance(val, (list, dict)):
+                row[key] = _safe(val)
+    try:
+        gross = float(_parse_amount(extracted.get("premium_sought_gross", "")))
+        limit = float(_parse_amount(extracted.get("limit_aoo", "")))
+        tiv   = float(_parse_amount(extracted.get("tiv_total", "")))
+        if limit > 0:
+            row["rate_on_line_pct"] = f"{round(gross / limit * 100, 4)}%"
+        if tiv > 0:
+            row["rate_on_tiv_pct"] = f"{round(gross / tiv * 100, 4)}%"
+    except (ValueError, TypeError):
+        pass
+    try:
+        gross = float(_parse_amount(extracted.get("premium_sought_gross", "")))
+        prior = float(_parse_amount(extracted.get("prior_premium", "")))
+        if prior > 0:
+            row["implied_rate_change"] = f"{round((gross - prior) / prior * 100, 1)}%"
+    except (ValueError, TypeError):
+        pass
+    uw_flags    = [f for f in (extracted.get("uw_analyst_flags") or []) if isinstance(f, dict)]
+    red_flags   = [f.get("flag", "") for f in uw_flags if str(f.get("severity","")).upper() == "RED"]
+    amber_flags = [f.get("flag", "") for f in uw_flags if str(f.get("severity","")).upper() == "AMBER"]
+    row["red_flags"]   = " | ".join(red_flags)
+    row["amber_flags"] = " | ".join(amber_flags)
+    return row
+
+
+def save_triage_csv(row: dict, output_folder: str,
+                    filename: str = "triage_matrix.csv") -> str:
+    """Append triage row. Grows across runs — one file per portfolio."""
+    data_folder = _output_root(output_folder)
+    filepath    = os.path.join(data_folder, filename)
+    file_exists = os.path.exists(filepath)
+    with open(filepath, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=TRIAGE_SCHEMA)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
+    return filepath
+
+
+def build_triage_locations_rows(extracted: dict) -> tuple:
+    TRIAGE_LOC_SCHEMA = [
+        "extraction_date", "insured_name", "insured_country",
+        "location_id", "location_name", "city", "country",
+        "latitude", "longitude",
+        "occupancy", "tiv_total", "currency", "notes",
+    ]
+    rows     = []
+    insured  = _safe(extracted.get("insured_name"))
+    country  = _safe(extracted.get("insured_country"))
+    currency = _safe(extracted.get("tiv_currency") or "")
+    today    = datetime.date.today().isoformat()
+    locations = [l for l in (extracted.get("sov_locations") or []) if isinstance(l, dict)]
+    if locations:
+        for i, loc in enumerate(locations):
+            row = {col: "" for col in TRIAGE_LOC_SCHEMA}
+            row["extraction_date"] = today
+            row["insured_name"]    = insured
+            row["insured_country"] = country
+            row["location_id"]     = f"LOC-{str(i+1).zfill(3)}"
+            row["location_name"]   = _safe(loc.get("location_name") or loc.get("name"))
+            row["city"]            = _safe(loc.get("city"))
+            row["country"]         = _safe(loc.get("country"))
+            row["latitude"]        = _safe(loc.get("latitude") or loc.get("lat"))
+            row["longitude"]       = _safe(loc.get("longitude") or loc.get("lon") or loc.get("lng"))
+            row["occupancy"]       = _safe(loc.get("occupancy") or loc.get("use"))
+            row["tiv_total"]       = _safe(loc.get("tiv_total") or loc.get("tiv"))
+            row["currency"]        = _safe(loc.get("currency") or currency)
+            row["notes"]           = _safe(loc.get("notes"))
+            rows.append(row)
+    else:
+        row = {col: "" for col in TRIAGE_LOC_SCHEMA}
+        row["extraction_date"] = today
+        row["insured_name"]    = insured
+        row["insured_country"] = country
+        row["location_id"]     = "AGG-001"
+        row["location_name"]   = "Aggregate (no SOV)"
+        row["country"]         = country
+        row["tiv_total"]       = _safe(extracted.get("tiv_total"))
+        row["currency"]        = currency
+        row["notes"]           = "No SOV - aggregate TIV only"
+        rows.append(row)
+    return rows, TRIAGE_LOC_SCHEMA
+
+
+def save_triage_locations_csv(rows: list, schema: list,
+                               output_folder: str,
+                               filename: str = "triage_locations.csv") -> str:
+    """Append location rows across runs — full portfolio location history."""
+    data_folder = _output_root(output_folder)
+    filepath    = os.path.join(data_folder, filename)
+    file_exists = os.path.exists(filepath)
+    with open(filepath, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=schema)
+        if not file_exists:
+            writer.writeheader()
+        writer.writerows(rows)
+    return filepath
+
+
 # ── SAVE SUMMARY REPORT ───────────────────────────────────────
 def build_summary_text(
     extracted: dict,
@@ -513,7 +650,7 @@ def build_summary_text(
 
     lines = []
     lines.append("=" * 70)
-    lines.append("  PINE WALK PRICING — AI SUBMISSION SUMMARY")
+    lines.append("  AI SUBMISSION SUMMARY")
     lines.append("=" * 70)
     lines.append(f"  Class:        {class_label}")
     lines.append(f"  Case Folder:  {folder_name}")

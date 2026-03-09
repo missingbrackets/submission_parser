@@ -1,8 +1,8 @@
 @echo off
-title Pine Walk — Submission Analyser
+title Submission Analyser
 echo.
 echo  ============================================
-echo   PINE WALK — Submission Analyser
+echo   Submission Analyser
 echo  ============================================
 echo.
 

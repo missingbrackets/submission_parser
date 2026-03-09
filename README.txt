@@ -1,4 +1,4 @@
-PINE WALK — SUBMISSION ANALYSER
+SUBMISSION ANALYSER
 ================================
 AI-powered submission extraction, gap analysis, and rating model data prep.
 Built for London Market casualty (extensible to other classes).

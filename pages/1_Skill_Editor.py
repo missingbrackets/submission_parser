@@ -94,7 +94,7 @@ def _badge(is_new: bool, is_override: bool) -> str:
 
 def _reset_editor_state():
     for k in list(st.session_state.keys()):
-        if k.startswith("editor_"):
+        if k.startswith("editor_") and k != "editor_skill_select":
             del st.session_state[k]
 
 

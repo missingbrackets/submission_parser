@@ -62,6 +62,7 @@ class FieldSection(Enum):
     BI_EXT      = "BI & Extensions"
     GEO         = "Geopolitical Assessment"
     RATER       = "Rater Inputs"
+    GEO_VIZ     = "Map & Imagery"
 
 
 # ── TAB CONFIGURATION ────────────────────────────────────────
@@ -232,6 +233,7 @@ class BaseSkill:
             FieldSection.BI_EXT:    "🔄",
             FieldSection.GEO:       "🌍",
             FieldSection.RATER:     "🧮",
+            FieldSection.GEO_VIZ:   "🗺️",
         }
 
         return [

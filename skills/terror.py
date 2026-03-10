@@ -44,6 +44,7 @@ class TerrorSkill(BaseSkill):
         TabConfig(FieldSection.FLAGS,     icon="⚠️", default_on=True,  description="Compliance, sanctions, prior declinatures, known circumstances"),
         TabConfig(FieldSection.RATER,     icon="🧮", default_on=True,  description="Structured rater inputs — exposure, layer, TIV, currency"),
         TabConfig(FieldSection.ANALYTICS, icon="🚩", default_on=True,  description="UW analyst flags, data conflicts, broker questions"),
+        TabConfig(FieldSection.GEO_VIZ,   icon="🗺️", default_on=True,  description="Interactive location map, Street View and satellite imagery"),
     ]
 
     # ── CLAIMS CSV SCHEMA ─────────────────────────────────────

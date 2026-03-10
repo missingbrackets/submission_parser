@@ -52,6 +52,7 @@ class PVDirectTriageSkill(BaseSkill):
         TabConfig(FieldSection.PREMIUM,   icon="💷", default_on=True,  description="Premium sought, commission and rate metrics"),
         TabConfig(FieldSection.FLAGS,     icon="🚦", default_on=True,  description="Eight RAG triage flags and overall recommendation"),
         TabConfig(FieldSection.ANALYTICS, icon="🚩", default_on=True,  description="UW flags and questions for broker"),
+        TabConfig(FieldSection.GEO_VIZ,   icon="🗺️", default_on=True,  description="Interactive location map, Street View and satellite imagery"),
     ]
 
     CLAIMS_SCHEMA = []   # no claims CSV for triage

@@ -37,6 +37,7 @@ class TerrorQuickSkill(BaseSkill):
         TabConfig(FieldSection.LOCATIONS, icon="📍", default_on=True,  description="Location schedule"),
         TabConfig(FieldSection.FLAGS,     icon="⚠️", default_on=True,  description="Triage flags"),
         TabConfig(FieldSection.ANALYTICS, icon="🚩", default_on=True,  description="UW flags and questions"),
+        TabConfig(FieldSection.GEO_VIZ,   icon="🗺️", default_on=True,  description="Interactive location map, Street View and satellite imagery"),
     ]
 
     # ── LOCATIONS CSV — per-location rows ────────────────────

@@ -62,12 +62,18 @@ def render_geo_viz_tab(extracted: dict) -> None:
     df = pd.DataFrame(rows)
 
     # ── 1. Map ────────────────────────────────────────────────
-    _render_map(df, extracted)
+    try:
+        _render_map(df, extracted)
+    except Exception as exc:
+        st.error(f"Map render error: {exc}")
 
     st.markdown("---")
 
     # ── 2. Per-location imagery ───────────────────────────────
-    _render_imagery_grid(rows, google_api_key)
+    try:
+        _render_imagery_grid(rows, google_api_key)
+    except Exception as exc:
+        st.error(f"Imagery render error: {exc}")
 
 
 # ── Map section ───────────────────────────────────────────────
@@ -89,20 +95,28 @@ def _render_map(df, extracted):
         df_map = df_map.copy()
         df_map["size"] = ((df_map["tiv"] / max_tiv) * 25 + 8).clip(lower=8)
 
+        # Build a clean hover-text column (Plotly can't handle empty-string hover_data columns)
+        df_map = df_map.copy()
+        df_map["location_detail"] = df_map.apply(
+            lambda r: " · ".join(p for p in [r.get("address", ""), r.get("city", ""), r.get("country", "")] if p),
+            axis=1,
+        )
+
         fig = px.scatter_geo(
             df_map,
             lat="lat",
             lon="lon",
             hover_name="name",
             hover_data={
-                "address": True,
-                "city":    True,
-                "country": True,
-                "tiv":     ":,.0f",
-                "lat":     False,
-                "lon":     False,
-                "size":    False,
-                "label":   False,
+                "location_detail": True,
+                "tiv":             ":,.0f",
+                "lat":             False,
+                "lon":             False,
+                "size":            False,
+                "label":           False,
+                "address":         False,
+                "city":            False,
+                "country":         False,
             },
             size="size",
             size_max=35,
@@ -188,6 +202,23 @@ def _render_imagery_grid(rows: list[dict], google_api_key: str) -> None:
     if not google_api_key or google_api_key.startswith("your-"):
         st.info("Add `GOOGLE_API_KEY` to `.streamlit/secrets.toml` to enable Street View and satellite imagery.")
         return
+
+    # ── API diagnostics (expander — always shown so user can debug) ──
+    with st.expander("Google API status", expanded=False):
+        from core.geo_images import diagnose_google_apis
+        # Use first fetchable location for the probe, or default London coords
+        probe_lat, probe_lon = 51.5145, -0.0814
+        if rows:
+            pl = _to_float(rows[0].get("lat"))
+            pp = _to_float(rows[0].get("lon"))
+            if pl is not None and pp is not None:
+                probe_lat, probe_lon = pl, pp
+        with st.spinner("Testing Google API endpoints…"):
+            diag = diagnose_google_apis(google_api_key, probe_lat, probe_lon)
+        for svc, status in diag.items():
+            ok = status == "OK"
+            icon = "✅" if ok else "❌"
+            st.markdown(f"**{icon} {svc}**: `{status}`")
 
     # Resolve precise coordinates for each location.
     # Priority: (1) street address geocoded → building-level precision

@@ -44,17 +44,19 @@ def render_geo_viz_tab(extracted: dict) -> None:
         lat = _to_float(loc.get("latitude") or loc.get("lat"))
         lon = _to_float(loc.get("longitude") or loc.get("lon"))
         name    = loc.get("location_name") or loc.get("name") or "Unnamed"
+        address = loc.get("address") or loc.get("street_address") or ""
         city    = loc.get("city") or ""
         country = loc.get("country") or ""
         tiv     = _to_float(loc.get("tiv") or loc.get("tiv_total") or loc.get("tiv_pd"))
         rows.append({
             "name":    name,
+            "address": address,
             "city":    city,
             "country": country,
             "lat":     lat,
             "lon":     lon,
             "tiv":     tiv or 0,
-            "label":   f"{name}<br>{city}, {country}<br>TIV: {_fmt_tiv(tiv)}",
+            "label":   f"{name}<br>{address + '<br>' if address else ''}{city}, {country}<br>TIV: {_fmt_tiv(tiv)}",
         })
 
     df = pd.DataFrame(rows)
@@ -93,6 +95,7 @@ def _render_map(df, extracted):
             lon="lon",
             hover_name="name",
             hover_data={
+                "address": True,
                 "city":    True,
                 "country": True,
                 "tiv":     ":,.0f",
@@ -178,9 +181,7 @@ def _render_map(df, extracted):
 # ── Imagery grid ──────────────────────────────────────────────
 
 def _render_imagery_grid(rows: list[dict], google_api_key: str) -> None:
-    from core.geo_images import (
-        geocode_address, get_streetview_image, get_satellite_image
-    )
+    from core.geo_images import geocode_address
 
     st.markdown("#### Location Imagery")
 
@@ -188,19 +189,37 @@ def _render_imagery_grid(rows: list[dict], google_api_key: str) -> None:
         st.info("Add `GOOGLE_API_KEY` to `.streamlit/secrets.toml` to enable Street View and satellite imagery.")
         return
 
-    # Filter to locations that have coords or an address we can geocode
+    # Resolve precise coordinates for each location.
+    # Priority: (1) street address geocoded → building-level precision
+    #           (2) existing lat/lon (usually city-centre from Claude) → fallback
+    #           (3) geocode from city + country → last resort
     fetchable = []
     for loc in rows:
-        lat, lon = loc.get("lat"), loc.get("lon")
-        if lat is None or lon is None:
-            # Try geocoding from city + country
-            addr_parts = [p for p in [loc.get("city"), loc.get("country")] if p]
+        lat, lon   = loc.get("lat"), loc.get("lon")
+        address    = loc.get("address") or ""
+        city       = loc.get("city") or ""
+        country    = loc.get("country") or ""
+        geocode_src = None
+
+        if address:
+            # Always geocode from street address — Claude's lat/lon are often
+            # city-centre approximations, not building-level.
+            full_addr = ", ".join(p for p in [address, city, country] if p)
+            coords = geocode_address(full_addr, google_api_key)
+            if coords:
+                lat, lon = coords
+                geocode_src = f"Geocoded from: {full_addr}"
+        elif lat is None or lon is None:
+            # No address and no coords — try city + country
+            addr_parts = [p for p in [city, country] if p]
             if addr_parts:
                 coords = geocode_address(", ".join(addr_parts), google_api_key)
                 if coords:
                     lat, lon = coords
+                    geocode_src = f"Geocoded from: {', '.join(addr_parts)}"
+
         if lat is not None and lon is not None:
-            fetchable.append({**loc, "lat": lat, "lon": lon})
+            fetchable.append({**loc, "lat": lat, "lon": lon, "_geocode_src": geocode_src})
 
     if not fetchable:
         st.warning("No geocodable locations found — imagery unavailable.")
@@ -215,20 +234,23 @@ def _render_imagery_grid(rows: list[dict], google_api_key: str) -> None:
 
 
 def _render_location_card(loc: dict, api_key: str) -> None:
-    from core.geo_images import get_streetview_image, get_satellite_image
+    lat, lon     = loc["lat"], loc["lon"]
+    name         = loc.get("name") or "Location"
+    address      = loc.get("address") or ""
+    city         = loc.get("city") or ""
+    country      = loc.get("country") or ""
+    tiv_label    = _fmt_tiv(loc.get("tiv"))
+    geocode_src  = loc.get("_geocode_src") or ""
 
-    lat, lon  = loc["lat"], loc["lon"]
-    name      = loc.get("name") or "Location"
-    city      = loc.get("city") or ""
-    country   = loc.get("country") or ""
-    tiv_label = _fmt_tiv(loc.get("tiv"))
+    subtitle = " · ".join(p for p in [address, city, country] if p)
 
     st.markdown(
         f'<div style="background:#111827; border:1px solid #1E2D45; border-radius:6px; '
         f'padding:10px 12px; margin-bottom:4px;">'
         f'<div style="font-size:0.82rem; font-weight:700; color:#E2E8F0;">{name}</div>'
-        f'<div style="font-size:0.75rem; color:#64748B;">{city}{", " if city and country else ""}{country}</div>'
+        + (f'<div style="font-size:0.75rem; color:#64748B;">{subtitle}</div>' if subtitle else "")
         + (f'<div style="font-size:0.72rem; color:#00C2FF; margin-top:2px;">TIV: {tiv_label}</div>' if tiv_label != "—" else "")
+        + (f'<div style="font-size:0.68rem; color:#374151; margin-top:3px;">{geocode_src}</div>' if geocode_src else "")
         + f'</div>',
         unsafe_allow_html=True,
     )

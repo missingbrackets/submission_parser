@@ -157,10 +157,11 @@ LOCATION EXTRACTION (SOV)
 ════════════════════════════════════════════
 
 Extract per-location data into sov_locations array. For each location:
-- location_name, city, country (required if available)
+- location_name, address (street address if stated), city, country (required if available)
 - tiv_total (the declared value for that location)
 - occupancy (warehouse / office / industrial / infrastructure)
-- latitude, longitude: infer from city/country if not stated — use city-centre coords
+- latitude, longitude: use stated coordinates if given; otherwise infer from the
+  street address or city/country — use the most precise coords possible.
   Leave null only if location is too vague to geocode
 
 ════════════════════════════════════════════
@@ -242,6 +243,7 @@ Return this exact JSON structure:
   "sov_locations": [
     {
       "location_name": null,
+      "address": null,
       "city": null,
       "country": null,
       "latitude": null,

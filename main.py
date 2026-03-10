@@ -21,9 +21,11 @@ st.set_page_config(
 
 from ui.pages.analyser import analyser_page
 from ui.pages.skill_editor import skill_editor_page
+from ui.pages.docs import docs_page
 
 pg = st.navigation([
     st.Page(analyser_page,    title="Submission Analyser", icon="📋"),
     st.Page(skill_editor_page, title="Skill Viewer",         icon="📖"),
+    st.Page(docs_page,        title="Documentation",        icon="📚"),
 ])
 pg.run()

@@ -39,6 +39,66 @@ def geocode_address(address: str, api_key: str) -> tuple[float, float] | None:
         return None
 
 
+def diagnose_google_apis(api_key: str, lat: float = 51.5145, lon: float = -0.0814) -> dict:
+    """
+    Test each Google Maps API endpoint and return a status dict.
+    Used by the UI to surface misconfiguration to the user.
+    Returns: {"geocoding": "OK"|error, "streetview_meta": "OK"|error, "static_maps": "OK"|error}
+    """
+    results = {}
+
+    # 1. Geocoding
+    try:
+        r = requests.get(
+            _GEOCODE_URL,
+            params={"address": "London, UK", "key": api_key},
+            timeout=10, verify=False,
+        ).json()
+        results["geocoding"] = r.get("status", "UNKNOWN")
+        if "error_message" in r:
+            results["geocoding"] += f": {r['error_message']}"
+    except Exception as e:
+        results["geocoding"] = f"EXCEPTION: {e}"
+
+    # 2. Street View metadata
+    try:
+        r = requests.get(
+            _STREETVIEW_META,
+            params={"location": f"{lat},{lon}", "key": api_key},
+            timeout=10, verify=False,
+        ).json()
+        results["streetview_meta"] = r.get("status", "UNKNOWN")
+        if "error_message" in r:
+            results["streetview_meta"] += f": {r['error_message']}"
+    except Exception as e:
+        results["streetview_meta"] = f"EXCEPTION: {e}"
+
+    # 3. Static Maps (satellite) — a tiny 64x64 tile to keep it cheap
+    try:
+        r = requests.get(
+            _STATICMAP_URL,
+            params={
+                "center": f"{lat},{lon}", "zoom": "15",
+                "size": "64x64", "maptype": "satellite", "key": api_key,
+            },
+            timeout=10, verify=False,
+        )
+        ct = r.headers.get("Content-Type", "")
+        if r.status_code == 200 and ct.startswith("image/"):
+            results["static_maps"] = "OK"
+        else:
+            results["static_maps"] = f"HTTP {r.status_code} / Content-Type: {ct}"
+            try:
+                err = r.json()
+                results["static_maps"] += f" / {err.get('error_message', '')}"
+            except Exception:
+                pass
+    except Exception as e:
+        results["static_maps"] = f"EXCEPTION: {e}"
+
+    return results
+
+
 def get_streetview_image(
     lat: float,
     lon: float,

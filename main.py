@@ -24,6 +24,6 @@ from ui.pages.skill_editor import skill_editor_page
 
 pg = st.navigation([
     st.Page(analyser_page,    title="Submission Analyser", icon="📋"),
-    st.Page(skill_editor_page, title="Skill Editor",        icon="⚙️"),
+    st.Page(skill_editor_page, title="Skill Viewer",         icon="📖"),
 ])
 pg.run()

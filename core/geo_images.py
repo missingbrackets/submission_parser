@@ -54,17 +54,32 @@ def get_streetview_image(
     if not api_key:
         return None
     try:
-        # Check metadata first to confirm imagery exists
+        # Check metadata first to confirm imagery exists.
+        # Try outdoor-only first; fall back to any source if no outdoor panorama found.
         meta = requests.get(
             _STREETVIEW_META,
             params={
                 "location": f"{lat},{lon}",
+                "radius": 50,
                 "source": "outdoor",
                 "key": api_key,
             },
             timeout=10,
             verify=False,
         ).json()
+
+        if meta.get("status") != "OK":
+            # Retry without source restriction (catches indoor / photo-sphere)
+            meta = requests.get(
+                _STREETVIEW_META,
+                params={
+                    "location": f"{lat},{lon}",
+                    "radius": 100,
+                    "key": api_key,
+                },
+                timeout=10,
+                verify=False,
+            ).json()
 
         if meta.get("status") != "OK":
             return None

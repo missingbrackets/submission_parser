@@ -44,8 +44,10 @@ def analyser_page():
     with st.sidebar:
         st.markdown("### ⚙️ Configuration")
 
+        _default_key = st.secrets.get("ANTHROPIC_API_KEY", "")
         api_key = st.text_input(
             "Anthropic API Key",
+            value=_default_key,
             type="password",
             placeholder="sk-ant-...",
             help="Your Claude API key. Get one at console.anthropic.com",

@@ -9,7 +9,6 @@ import streamlit as st
 from skills.base import FieldSection, FieldType
 from core.outputs import build_claims_csv_rows, build_csv_row
 from core.report import build_summary_text
-from ui.components.geo_viz import render_geo_viz_tab
 
 
 def render_data_tabs(
@@ -60,9 +59,6 @@ def render_data_tabs(
 
             elif _tc.section == FieldSection.FLAGS:
                 _render_flags_tab(extracted, _section_fields)
-
-            elif _tc.section == FieldSection.GEO_VIZ:
-                render_geo_viz_tab(extracted)
 
             else:
                 _render_default_tab(extracted, _section_fields)
